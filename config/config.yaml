@@ -1,0 +1,56 @@
+﻿# Core configuration for the voice assistant stack.
+asr:
+  model_name: medium
+  device: auto
+  suppress_silence: true
+
+nlp:
+  siliconflow:
+    api_key: "sk-lkunyzkqcbwlhtumufqbtgrjfitswvahktdahnjiilgaiztw"
+    model: deepseek-ai/DeepSeek-R1
+    base_url: https://api.siliconflow.cn/v1
+
+  knowledge_base:
+    enabled: true
+    embedding_model: sentence-transformers/paraphrase-multilingual-mpnet-base-v2
+    index_path: models/embeddings/knowledge_base.json
+  system_prompt: |
+    You are a bilingual voice assistant. Think through the answer step by step and briefly explain your reasoning.
+
+tts:
+  provider: cosyvoice # options: cosyvoice, higgs
+  model_dir: models/tts/cosyvoice
+  speaker: cosyvoice_default
+  text_language: zh
+  prompt_language: zh
+  sample_rate: 24000
+  format: wav
+  device: cuda
+  enabled: false
+  # Higgs example:
+  # api_base: http://localhost:8002
+  # api_key: "${HIGGSAUDIO_API_KEY}"
+  # default_voice: zh_female_v2
+  # timeout: 120
+
+agent:
+  enabled: false
+  system_prompt: |
+    You are a multimodal agent that can transcribe audio, retrieve knowledge, call the RAG answer tool, and synthesize speech when helpful.
+    Prefer the rag_answer tool for factual questions and keep the final reply concise and accurate.
+  retrieval_top_k: 4
+  auto_tts: false
+  temperature: 0.6
+  top_p: 0.9
+
+runtime:
+  tts_output_dir: logs
+
+memory:
+  enabled: false
+  short_term: {}
+  long_term: {}
+
+mcp:
+  host: 0.0.0.0
+  port: 9000
