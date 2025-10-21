@@ -390,7 +390,7 @@ def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
                         )
                     )
         except WebSocketDisconnect:
-            logger.info("ASR WebSocket disconnected")
+            logging.getLogger(__name__).info("ASR WebSocket disconnected")
         finally:
             buffer.clear()
 
