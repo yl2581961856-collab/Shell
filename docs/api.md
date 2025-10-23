@@ -144,3 +144,12 @@ docker run --rm --gpus all \
 ```
 
 Mount additional volumes (e.g., `/app/models`) if you need to supply model weights or persistent logs. For GPU deployment, keep the default base image (`pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime`) and pass `--gpus all`.
+
+---
+
+### Memory Subsystem
+
+- Enable memory in `config/config.yaml` (`memory.enabled=true`).
+- Short-term memory keeps the latest turns in-process for context injection.
+- Long-term memory uses a Mem0 instance. Start it locally (`docker run -p 3030:3030 mem0ai/mem0:latest`) and export `MEM0_API_KEY` so the server can authenticate.
+- The assistant summarises each turn via the configured LLM before persisting it to Mem0. Retrieved memories are appended to the chat prompt as `Memory notes`.

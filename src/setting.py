@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging.config
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -15,12 +16,25 @@ DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
 DEFAULT_LOGGING_PATH = PROJECT_ROOT / "config" / "logging.conf"
 
 
+def _expand_env(value: Any) -> Any:
+    """Recursively expand environment variable placeholders inside config values."""
+
+    if isinstance(value, str):
+        expanded = os.path.expandvars(value)
+        return expanded
+    if isinstance(value, dict):
+        return {k: _expand_env(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env(item) for item in value]
+    return value
+
+
 def load_config(path: Optional[str | Path] = None) -> Dict[str, Any]:
     config_path = Path(path) if path else DEFAULT_CONFIG_PATH
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    return data
+    return _expand_env(data)
 
 
 def configure_logging(config_path: Optional[str | Path] = None) -> None:

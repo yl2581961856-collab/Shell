@@ -6,7 +6,7 @@ asr:
 
 nlp:
   siliconflow:
-    api_key: "sk-lkunyzkqcbwlhtumufqbtgrjfitswvahktdahnjiilgaiztw"
+    api_key: "${SILICONFLOW_API_KEY}"
     model: deepseek-ai/DeepSeek-R1
     base_url: https://api.siliconflow.cn/v1
 
@@ -47,9 +47,28 @@ runtime:
   tts_output_dir: logs
 
 memory:
-  enabled: false
-  short_term: {}
-  long_term: {}
+  enabled: true
+  short_term:
+    type: sliding_window
+    window_size: 6
+  long_term:
+    provider: mem0
+    base_url: http://localhost:3030
+    api_key: "${MEM0_API_KEY}"
+    user_id: default
+    tags:
+      - voice-assistant
+    top_k: 5
+    summarize: true
+    summary_system_prompt: |
+      You maintain accurate, durable memory snippets for the assistant.
+    summary_prompt: |
+      Summarize the exchange below into at most three bullet points that capture enduring user preferences,
+      facts, or follow-up todos. Avoid referencing the assistant explicitly.
+      ---
+      {dialogue}
+    metadata:
+      source: voice_assistant
 
 mcp:
   host: 0.0.0.0

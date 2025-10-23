@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from .base import BaseLongTermMemory, BaseShortTermMemory
+from .mem0_backend import Mem0LongTermMemory, SlidingWindowMemory
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,11 @@ class MemoryManager:
                 logger.debug("Long-term memory snapshot not implemented yet")
 
 
-def build_memory_manager(config: Dict[str, Any]) -> Optional[MemoryManager]:
+def build_memory_manager(
+    config: Dict[str, Any],
+    *,
+    llm_client: Optional[Any] = None,
+) -> Optional[MemoryManager]:
     """Factory returning a configured MemoryManager or ``None``.
 
     The default implementation wires placeholders only. Integrations can replace
@@ -64,13 +69,31 @@ def build_memory_manager(config: Dict[str, Any]) -> Optional[MemoryManager]:
     if not memory_cfg.get("enabled"):
         return None
 
-    # Placeholders: actual implementations should be provided during integration.
+    short_cfg = memory_cfg.get("short_term", {})
+    long_cfg = memory_cfg.get("long_term", {})
+
     short_term: Optional[BaseShortTermMemory] = None
     long_term: Optional[BaseLongTermMemory] = None
 
-    if memory_cfg.get("short_term"):
-        logger.warning("Short-term memory backend not implemented yet. Please plug in custom class.")
-    if memory_cfg.get("long_term"):
-        logger.warning("Long-term memory backend not implemented yet. Please plug in custom class.")
+    short_type = (short_cfg.get("type") or "").lower()
+    if short_type in {"", "sliding_window"}:
+        window_size = int(short_cfg.get("window_size", 6) or 6)
+        try:
+            short_term = SlidingWindowMemory(window_size=window_size)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Failed to initialise short-term memory: %s", exc)
+            short_term = None
+    else:
+        logger.warning("Unsupported short-term memory type '%s'. Falling back to disabled.", short_type)
+
+    provider = (long_cfg.get("provider") or "").lower()
+    if provider == "mem0":
+        try:
+            long_term = Mem0LongTermMemory(long_cfg, llm_client=llm_client)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Failed to initialise Mem0 long-term memory: %s", exc)
+            long_term = None
+    elif provider:
+        logger.warning("Unsupported long-term memory provider '%s'. Memory disabled.", provider)
 
     return MemoryManager(short_term=short_term, long_term=long_term)

@@ -160,7 +160,7 @@ def build_conversation_manager(config: Dict[str, Any]) -> ConversationManager:
     tts_cfg = config.get("tts", {})
     tts_module: BaseTTS = create_tts(tts_cfg)
 
-    memory_manager: Optional[MemoryManager] = build_memory_manager(config)
+    memory_manager: Optional[MemoryManager] = build_memory_manager(config, llm_client=llm_client)
 
     return ConversationManager(
         asr=asr_module,

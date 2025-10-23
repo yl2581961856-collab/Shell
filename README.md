@@ -23,3 +23,20 @@ A modular voice assistant stack that strings together ASR (OpenAI Whisper/faster
 4. Use `/chat`, `/text_to_speech`, LangChain agent as needed.
 
 See `docs/api.md` for full API contract and `tools/ws_asr_client.py` for example streaming clients (file & microphone modes).
+
+### Memory & Mem0 Integration
+- Short-term memory keeps the last few conversation turns in-process (configurable sliding window).
+- Long-term memory can stream conversation summaries into a locally hosted [Mem0](https://github.com/mem0ai/mem0) instance.  
+  1. Launch Mem0 locally (example Docker run):  
+     `docker run -d --name mem0 -p 3030:3030 -e MEM0_API_KEY=local-dev mem0ai/mem0:latest`  
+     Adjust the port/API key to match your environment or follow the official Mem0 deployment docs.
+  2. Export the same key before starting the server: `set MEM0_API_KEY=local-dev` (PowerShell) or `export MEM0_API_KEY=local-dev` (bash).
+  3. Tune `memory.long_term` in `config/config.yaml` if your Mem0 endpoint, tags, or summarisation behaviour differ.
+- During a turn the assistant summarises the exchange through the configured LLM (SiliconFlow DeepSeek by default) before persisting the memory. Queries against Mem0 are injected back into the LLM via the `memory_context`.
+
+### 环境变量存放敏感 Key
+- 配置文件中的 `api_key` 字段全部改用 `${...}` 形式（例如 `${SILICONFLOW_API_KEY}`、`${MEM0_API_KEY}`），实际值请通过环境变量提供。
+- Windows PowerShell（当前会话）：`$env:SILICONFLOW_API_KEY="your-key"`；永久写入：`setx SILICONFLOW_API_KEY "your-key"`.
+- Linux/macOS（bash/zsh）：`export SILICONFLOW_API_KEY=your-key`，如需长期生效可写入 `~/.bashrc`。
+- Docker 运行时可以用 `-e SILICONFLOW_API_KEY=your-key` 注入环境变量。
+- 项目启动时会解析配置文件并自动替换 `${VAR}` 为对应环境变量，避免把 Key 写进 Git。
