@@ -21,6 +21,6 @@ COPY . .
 
 ENV PYTHONPATH=/app/src:${PYTHONPATH}
 
-EXPOSE 9000
+EXPOSE 9090
 
-CMD ["uvicorn", "src.mcp_server:create_app", "--factory", "--host", "0.0.0.0", "--port", "9000"]
+CMD ["uvicorn", "src.mcp_server:create_app", "--factory", "--host", "0.0.0.0", "--port", "9090"]
