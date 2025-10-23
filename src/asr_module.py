@@ -1,4 +1,4 @@
-import os
+﻿import os
 import logging
 import time
 from dataclasses import dataclass
@@ -96,7 +96,7 @@ class ASRModule:
                 "`faster-whisper` is required for ASRModule. Install with `pip install faster-whisper`."
             )
 
-        # 获取环境变量中的模型路径
+        # Resolve model path from environment (falls back to bundled directory).
         model_path = os.getenv("WHISPER_MODEL_PATH", "/app/models/whisper_model")
         if not Path(model_path).exists():
             raise RuntimeError(f"Model path {model_path} does not exist.")
@@ -116,12 +116,12 @@ class ASRModule:
             compute_type,
         )
 
-        # 使用本地路径加载模型
+        # Load model from local path only (no outbound requests).
         self._model = WhisperModel(
-            model_path,  # 直接使用模型路径作为第一个参数
+            model_path,  # Pass model path directly
             device=fw_device,
             compute_type=compute_type,
-            local_files_only=True,  # 仅使用本地文件
+            local_files_only=True,  # Use local files only
             **model_kwargs,
         )
 
@@ -192,3 +192,4 @@ class ASRModule:
             kwargs["initial_prompt"] = overrides.pop("initial_prompt")
         kwargs.update(overrides)
         return kwargs
+

@@ -5,8 +5,7 @@ FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/src:${PYTHONPATH} \
-    HF_HUB_OFFLINE=1
+    PYTHONPATH=/app/src
 
 # 安装系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -28,15 +27,17 @@ RUN pip install --upgrade pip \
 
 # 安装 CosyVoice 的依赖（如果有）
 COPY CosyVoice/requirements.txt /app/CosyVoice/requirements.txt
-RUN pip install --no-cache-dir -r /app/CosyVoice/requirements.txt
+RUN pip install --no-cache-dir --extra-index-url https://pypi.nvidia.com -r /app/CosyVoice/requirements.txt
 
 # 如果需要安装 CosyVoice 的源代码依赖，可以选择 pip install -e
 # RUN pip install -e /app/CosyVoice
 
-# 下载并存储模型到本地（在构建镜像时下载）
-# 假设你要下载 faster-whisper 的模型，并存储到 /app/models 目录
-RUN mkdir -p /app/models/whisper_model && \
-    python -c "from faster_whisper import WhisperModel; WhisperModel('medium', device='cuda', download_root='/app/models/whisper_model')"
+# 将已下载的 faster-whisper 模型拷贝进镜像
+# 构建前请将模型文件放在本地 models/whisper_model 目录
+COPY models/whisper_model /app/models/whisper_model
+
+# 运行时默认启用 Hugging Face 离线模式
+ENV HF_HUB_OFFLINE=1
 
 # 拷贝项目文件到容器
 COPY . .
