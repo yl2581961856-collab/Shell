@@ -1,0 +1,25 @@
+# VCS and IDE artifacts
+.git
+.gitmodules
+.gitignore
+.vscode/
+.idea/
+
+# Python cache
+**/__pycache__/
+**/*.py[cod]
+
+# Runtime artifacts
+logs/
+pretrained_models/
+voice-assistant-app.tar
+*.tar
+*.tar.gz
+*.zip
+
+# Large model directories (mount or copy explicitly if needed)
+models/whisper_model/
+models/tts/
+CosyVoice/checkpoints/
+CosyVoice/models/
+CosyVoice/logs/
