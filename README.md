@@ -17,10 +17,10 @@ A modular voice assistant stack that strings together ASR (OpenAI Whisper/faster
 - Dockerfile for reproducible deployment
 
 ### Streaming Workflow
-1. Capture audio -> `/ws/asr` (chunk + flush)
+1. Capture audio -> `ws://localhost:9090/ws/asr` (chunk + flush)
 2. Persist session under `logs/asr_sessions/<session_id>.jsonl`
-3. Query `/asr_session/{session_id}` for accumulated transcripts
-4. Use `/chat`, `/text_to_speech`, LangChain agent as needed.
+3. Query `http://localhost:9090/asr_session/{session_id}` for accumulated transcripts
+4. Use `http://localhost:9090/chat`, `/text_to_speech`, or LangChain agent as needed.
 
 See `docs/api.md` for full API contract and `tools/ws_asr_client.py` for example streaming clients (file & microphone modes).
 

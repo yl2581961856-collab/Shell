@@ -6,3 +6,5 @@ __pycache__/
 *.tar
 *.tar.gz
 mem0/
+*.DS_Store
+*.idea/

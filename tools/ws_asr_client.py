@@ -216,7 +216,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Streaming ASR WebSocket client")
     parser.add_argument(
         "--uri",
-        default="ws://127.0.0.1:9000/ws/asr",
+        default="ws://127.0.0.1:9090/ws/asr",
         help="ASR WebSocket endpoint",
     )
     parser.add_argument("--file", help="Path to audio file to stream")

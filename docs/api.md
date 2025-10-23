@@ -4,7 +4,7 @@ This document describes the REST and WebSocket endpoints exposed by the MCP/Fast
 
 ### Base URL
 
-Use `http://<host>:9000`. When running locally or via Docker, it is typically `http://localhost:9000`.
+Use `http://<host>:9090`. When running locally or via Docker, it is typically `http://localhost:9090`.
 
 ### Authentication
 
@@ -33,7 +33,7 @@ Upload an audio file and receive a full transcription.
 **Example**
 
 ```bash
-curl -X POST http://localhost:9000/speech_to_text \
+curl -X POST http://localhost:9090/speech_to_text \
   -F "file=@CosyVoice/asset/zero_shot_prompt.wav"
 ```
 
@@ -105,7 +105,7 @@ Convert text to speech using the configured TTS provider (CosyVoice or Higgs).
 
 The WebSocket interface exposes streaming ASR.
 
-1. Client connects to `ws://<host>:9000/ws/asr`.
+1. Client connects to `ws://<host>:9090/ws/asr`.
 2. Server replies with `{"type":"ready","session_id":"<uuid>"}`. Keep the `session_id` for later.
 3. Client sends audio chunks (base64-encoded 16-bit PCM) with optional language and sample rate:
 
@@ -138,7 +138,7 @@ GET /asr_session/<session_id>
 ```bash
 docker build -t voice-assistant:latest .
 docker run --rm --gpus all \
-  -p 9000:9000 \
+  -p 9090:9090 \
   -v $(pwd)/config:/app/config \
   voice-assistant:latest
 ```

@@ -70,7 +70,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--config", dest="config", help="Path to config.yaml override")
     parser.add_argument("--host", default="0.0.0.0", help="Server host")
-    parser.add_argument("--port", type=int, default=9000, help="Server port")
+    parser.add_argument("--port", type=int, default=9090, help="Server port")
     parser.add_argument("--audio", help="Audio file for CLI or agent mode")
     parser.add_argument("--text", help="Text input for CLI or agent mode")
     parser.add_argument(
