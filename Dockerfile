@@ -1,5 +1,5 @@
 # Lightweight runtime image built on PyTorch CUDA base
-FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
+FROM nvcr.io/nvidia/pytorch:25.05-py3
 
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
