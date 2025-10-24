@@ -8,9 +8,7 @@ ENV PIP_NO_CACHE_DIR=1 \
     HF_HUB_OFFLINE=1 \
     WHISPER_MODEL_PATH=/app/models/whisper_model
 
-RUN apt-get update || (apt-get install -y --no-install-recommends gnupg ca-certificates && \
-    chmod 644 /etc/apt/trusted.gpg /etc/apt/trusted.gpg.d/* && \
-    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 871920D1991BC93C && \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-get update) && \
     apt-get install -y --no-install-recommends \
     ffmpeg \
