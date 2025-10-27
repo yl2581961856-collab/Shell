@@ -5,7 +5,7 @@ ENV PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     HF_HUB_OFFLINE=1 \
-    WHISPER_MODEL_PATH=/app/data/models/whisper_model
+    WHISPER_MODEL_PATH=/data/models/whisper
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
