@@ -10,9 +10,9 @@ asr:
   chunk_length: null
   num_workers: null
   funasr:
-    model: models/funasr/SenseVoiceSmall   # 本地 FunASR 模型目录
-    vad_model: models/funasr/vad           # 可选：本地 VAD 模型目录
-    vad_config: models/funasr/vad/config.yaml
+    model: data/models/funasr/SenseVoiceSmall   # 本地 FunASR 模型目录
+    vad_model: data/models/funasr/vad           # 可选：本地 VAD 模型目录
+    vad_config: data/models/funasr/vad/config.yaml
     device: cuda
     batch_size: 1
     hotword: ""
@@ -24,15 +24,15 @@ nlp:
     base_url: https://api.siliconflow.cn/v1
 
   knowledge_base:
-    enabled: true
+    enabled: false
     embedding_model: sentence-transformers/paraphrase-multilingual-mpnet-base-v2
-    index_path: models/embeddings/knowledge_base.json
+    index_path: data/models/embeddings/knowledge_base.json
   system_prompt: |
     You are a bilingual voice assistant. Think through the answer step by step and briefly explain your reasoning.
 
 tts:
   provider: cosyvoice # options: cosyvoice, higgs
-  model_dir: models/tts/cosyvoice
+  model_dir: data/models/tts/cosyvoice
   speaker: cosyvoice_default
   text_language: zh
   prompt_language: zh

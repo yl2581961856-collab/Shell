@@ -44,6 +44,6 @@ See `docs/api.md` for the full API contract and `tools/ws_asr_client.py` for exa
 - Docker 运行时可以用 `-e SILICONFLOW_API_KEY=your-key` 注入变量，应用启动后会自动替换 `${VAR}`，避免密钥进入版本库。
 
 ### Docker 构建与离线模型
-- 构建镜像前，请把已下载的 faster-whisper 模型目录（例如 Hugging Face 缓存中的 `models--Systran--faster-whisper-medium/snapshots/<hash>`）复制到仓库根目录 `models/whisper_model/`。
-- Dockerfile 会将该目录复制进镜像 `/app/models/whisper_model`，并在运行时设置 `WHISPER_MODEL_PATH` 与 `HF_HUB_OFFLINE=1`。
+- 构建镜像前，请把已下载的 faster-whisper 模型目录（例如 Hugging Face 缓存中的 `models--Systran--faster-whisper-medium/snapshots/<hash>`）复制到仓库根目录 `data/models/whisper_model/`。
+- Dockerfile 会将该目录复制进镜像 `/app/data/models/whisper_model`，并在运行时设置 `WHISPER_MODEL_PATH` 与 `HF_HUB_OFFLINE=1`。
 - 若目录缺失或文件不完整（`config.json`、`model.bin` 等），ASR 模块无法加载，请提前准备好完整模型。

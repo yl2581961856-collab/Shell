@@ -143,7 +143,7 @@ docker run --rm --gpus all \
   voice-assistant:latest
 ```
 
-Mount additional volumes (e.g., `/app/models`) if you need to supply model weights or persistent logs. For GPU deployment, keep the default base image (`pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime`) and pass `--gpus all`.
+Mount additional volumes (e.g., `/app/data/models`) if you need to supply model weights or persistent logs. For GPU deployment, keep the default base image (`pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime`) and pass `--gpus all`.
 
 ---
 

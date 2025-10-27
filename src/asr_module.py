@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import os
 import time
 from dataclasses import dataclass
@@ -21,6 +21,9 @@ except ImportError:  # pragma: no cover - already required by the project
     sf = None  # type: ignore
 
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_WHISPER_MODEL_PATH = PROJECT_ROOT / "data" / "models" / "whisper_model"
 
 
 @dataclass
@@ -172,7 +175,7 @@ class ASRModule:
                 "`faster-whisper` is required for the default ASR provider. Install with `pip install faster-whisper`."
             )
 
-        model_path = os.getenv("WHISPER_MODEL_PATH", "/app/models/whisper_model")
+        model_path = os.getenv("WHISPER_MODEL_PATH", str(DEFAULT_WHISPER_MODEL_PATH))
         model_path = os.path.expandvars(model_path)
         if not Path(model_path).exists():
             raise RuntimeError(f"Model path {model_path} does not exist.")
@@ -200,7 +203,7 @@ class ASRModule:
             **model_kwargs,
         )
 
-    def _load_funasr(self) -> None:
+    def _load_funasr(self) -> None:       #这是新加的模型，必要的时候调用
         try:
             from funasr import AutoModel  # type: ignore
         except ImportError as exc:  # pragma: no cover - optional dependency

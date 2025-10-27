@@ -143,7 +143,7 @@ def build_conversation_manager(config: Dict[str, Any]) -> ConversationManager:
     if knowledge_cfg.get("enabled", True):
         kb_path = knowledge_cfg.get("index_path")
         if not kb_path:
-            kb_path = PROJECT_ROOT / "models" / "embeddings" / "knowledge_base.json"
+            kb_path = PROJECT_ROOT / "data" / "models" / "embeddings" / "knowledge_base.json"
         knowledge_base = KnowledgeBase(
             embedding_model=knowledge_cfg.get(
                 "embedding_model", "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
