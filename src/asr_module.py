@@ -22,8 +22,8 @@ except ImportError:  # pragma: no cover - already required by the project
 
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_WHISPER_MODEL_PATH = PROJECT_ROOT / "models" / "whisper_model"
+# PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_WHISPER_MODEL_PATH = "/data/models/whisper"
 
 
 @dataclass
