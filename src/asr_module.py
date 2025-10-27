@@ -1,4 +1,6 @@
-import os
+"""Speech recognition module powered by faster-whisper."""
+from __future__ import annotations
+
 import logging
 import time
 from dataclasses import dataclass
@@ -17,9 +19,11 @@ except ImportError:  # pragma: no cover - make dependency error explicit at runt
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class ASRSegment:
     """Transcribed segment with time alignment."""
+
     text: str
     start: float
     end: float
@@ -28,6 +32,7 @@ class ASRSegment:
 @dataclass
 class ASRResult:
     """Container for a transcription result."""
+
     text: str
     segments: List[ASRSegment]
     language: Optional[str]
@@ -37,6 +42,7 @@ class ASRResult:
 @dataclass
 class ASRStreamingResult:
     """Streaming response container for incremental consumers."""
+
     segments: Iterator[ASRSegment]
     language: Optional[str]
     duration: float
@@ -86,6 +92,7 @@ class ASRModule:
             return self.compute_type
         if device == "cuda":
             return "float16"
+        # int8_float16 keeps good accuracy on CPU while using less memory
         return "int8_float16"
 
     def load(self) -> None:
@@ -96,32 +103,22 @@ class ASRModule:
                 "`faster-whisper` is required for ASRModule. Install with `pip install faster-whisper`."
             )
 
-        # 获取环境变量中的模型路径
-        model_path = os.getenv("WHISPER_MODEL_PATH", "/app/models/whisper_model")
-        if not Path(model_path).exists():
-            raise RuntimeError(f"Model path {model_path} does not exist.")
-
         device = self._resolve_device()
         fw_device = device if device in ("cuda", "cpu") else "cpu"
         compute_type = self._resolve_compute_type(fw_device)
         model_kwargs = dict(self.load_kwargs)
         if self.num_workers is not None:
             model_kwargs.setdefault("num_workers", self.num_workers)
-
         logger.info(
-            "Loading faster-whisper model %s from %s on %s (compute_type=%s)",
+            "Loading faster-whisper model %s on %s (compute_type=%s)",
             self.model_name,
-            model_path,
             fw_device,
             compute_type,
         )
-
-        # 使用本地路径加载模型
         self._model = WhisperModel(
-            model_path,  # 直接使用模型路径作为第一个参数
+            self.model_name,
             device=fw_device,
             compute_type=compute_type,
-            local_files_only=True,  # 仅使用本地文件
             **model_kwargs,
         )
 
@@ -179,6 +176,7 @@ class ASRModule:
 
     def _build_transcribe_kwargs(self, overrides: dict) -> dict:
         """Merge call-time overrides with module defaults."""
+
         kwargs = {
             "beam_size": overrides.pop("beam_size", self.beam_size),
             "vad_filter": overrides.pop("vad_filter", self.suppress_silence),
