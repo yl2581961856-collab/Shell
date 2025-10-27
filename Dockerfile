@@ -2,7 +2,10 @@ FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
 
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    HF_HUB_OFFLINE=1 \
+    WHISPER_MODEL_PATH=/app/data/models/whisper_model
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
@@ -19,7 +22,7 @@ RUN pip install --upgrade pip \
 
 COPY . .
 
-ENV PYTHONPATH=/app/src:${PYTHONPATH}
+RUN mkdir -p /app/data/models/whisper_model /app/data/models/embeddings
 
 EXPOSE 9090
 
