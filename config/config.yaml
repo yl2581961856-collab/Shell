@@ -60,7 +60,7 @@ runtime:
   tts_output_dir: logs
 
 memory:
-  enabled: true
+  enabled: false
   short_term:
     type: sliding_window
     window_size: 6
@@ -72,7 +72,7 @@ memory:
     tags:
       - voice-assistant
     top_k: 5
-    summarize: true
+    summarize: false
     summary_system_prompt: |
       You maintain accurate, durable memory snippets for the assistant.
     summary_prompt: |

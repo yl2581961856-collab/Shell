@@ -158,7 +158,9 @@ def build_conversation_manager(config: Dict[str, Any]) -> ConversationManager:
     )
 
     tts_cfg = config.get("tts", {})
-    tts_module: BaseTTS = create_tts(tts_cfg)
+    tts_module: Optional[BaseTTS] = None
+    if tts_cfg.get("enabled", True):
+        tts_module = create_tts(tts_cfg)
 
     memory_manager: Optional[MemoryManager] = build_memory_manager(config, llm_client=llm_client)
 
