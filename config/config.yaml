@@ -9,13 +9,13 @@ asr:
   beam_size: 5
   chunk_length: null
   num_workers: null
-#  funasr:
-#    model: data/models/funasr/SenseVoiceSmall   # 本地 FunASR 模型目录
-#    vad_model: data/models/funasr/vad           # 可选：本地 VAD 模型目录
-#    vad_config: data/models/funasr/vad/config.yaml
-#    device: cuda
-#    batch_size: 1
-#    hotword: ""
+  # funasr:
+  #   model: data/models/funasr/SenseVoiceSmall   # 本地 FunASR 模型目录
+  #   vad_model: data/models/funasr/vad           # 可选：本地 VAD 模型目录
+  #   vad_config: data/models/funasr/vad/config.yaml
+  #   device: cuda
+  #   batch_size: 1
+  #   hotword: ""
 
 nlp:
   siliconflow:
