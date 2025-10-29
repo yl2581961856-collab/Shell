@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import logging
 import tempfile
@@ -143,7 +144,7 @@ def build_conversation_manager(config: Dict[str, Any]) -> ConversationManager:
     if knowledge_cfg.get("enabled", True):
         kb_path = knowledge_cfg.get("index_path")
         if not kb_path:
-            kb_path = PROJECT_ROOT / "models" / "embeddings" / "knowledge_base.json"
+            kb_path = PROJECT_ROOT / "data" / "models" / "embeddings" / "knowledge_base.json"
         knowledge_base = KnowledgeBase(
             embedding_model=knowledge_cfg.get(
                 "embedding_model", "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
@@ -158,7 +159,9 @@ def build_conversation_manager(config: Dict[str, Any]) -> ConversationManager:
     )
 
     tts_cfg = config.get("tts", {})
-    tts_module: BaseTTS = create_tts(tts_cfg)
+    tts_module: Optional[BaseTTS] = None
+    if tts_cfg.get("enabled", True):
+        tts_module = create_tts(tts_cfg)
 
     memory_manager: Optional[MemoryManager] = build_memory_manager(config, llm_client=llm_client)
 
@@ -198,6 +201,7 @@ def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
     app.state.manager = manager
     app.state.agent = agent
     app.state.asr_session_store = ASRSessionStore(PROJECT_ROOT / "logs" / "asr_sessions")
+    app.state.asr_lock = asyncio.Lock()
 
     @app.post("/speech_to_text")
     async def speech_to_text(file: UploadFile = File(...)) -> Dict[str, Any]:
@@ -352,10 +356,25 @@ def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
                         asr_kwargs["chunk_length"] = float(payload["chunk_length"])
 
                     loop = asyncio.get_running_loop()
-                    segments, language, duration = await loop.run_in_executor(
-                        None, _run_transcribe_stream, app.state.manager.asr, tmp_path, asr_kwargs
-                    )
-                    tmp_path.unlink(missing_ok=True)
+                    asr_lock: asyncio.Lock = app.state.asr_lock
+                    try:
+                        async with asr_lock:
+                            segments, language, duration = await loop.run_in_executor(
+                                None, _run_transcribe_stream, app.state.manager.asr, tmp_path, asr_kwargs
+                            )
+                    except Exception as exc:  # pragma: no cover - defensive handling
+                        logging.getLogger(__name__).exception("ASR transcription failed")
+                        tmp_path.unlink(missing_ok=True)
+                        await websocket.send_text(
+                            json.dumps(
+                                {"type": "error", "message": f"Transcription failed: {exc}"},
+                                ensure_ascii=False,
+                            )
+                        )
+                        await websocket.close(code=1011, reason="transcription failed")
+                        return
+                    finally:
+                        tmp_path.unlink(missing_ok=True)
 
                     store.append(session_id, segments, language=language, duration=duration)
                     await websocket.send_text(
@@ -391,6 +410,17 @@ def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
                     )
         except WebSocketDisconnect:
             logging.getLogger(__name__).info("ASR WebSocket disconnected")
+        except Exception as exc:  # pragma: no cover - defensive handling
+            logger = logging.getLogger(__name__)
+            logger.exception("Unhandled error in ASR WebSocket loop")
+            try:
+                await websocket.send_text(
+                    json.dumps({"type": "error", "message": f"Internal error: {exc}"}, ensure_ascii=False)
+                )
+            except Exception:
+                pass
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1011, reason="internal error")
         finally:
             buffer.clear()
 
