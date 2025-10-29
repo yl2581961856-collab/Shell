@@ -34,8 +34,6 @@ RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ \
 
 COPY . .
 
-ENV PYTHONPATH=/app/src:${PYTHONPATH}
-
 EXPOSE 9090
 
 CMD ["uvicorn", "src.mcp_server:create_app", "--factory", "--host", "0.0.0.0", "--port", "9090"]
