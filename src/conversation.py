@@ -43,7 +43,7 @@ class ConversationManager:
         self,
         asr: ASRModule,
         nlp: NLPModule,
-        tts: BaseTTS,
+        tts: Optional[BaseTTS],
         *,
         session_id: Optional[str] = None,
         tts_output_dir: str | Path = "voice_assistant/output",
@@ -118,7 +118,7 @@ class ConversationManager:
         )
 
         tts_response: Optional[TTSResponse] = None
-        if nlp_result.answer:
+        if self.tts and nlp_result.answer:
             tts_response = self.tts.synthesize(nlp_result.answer, self.tts_output_dir)
 
         turn = self._update_state(
