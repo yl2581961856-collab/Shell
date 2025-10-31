@@ -6,6 +6,7 @@ import base64
 import contextlib
 import json
 import logging
+import re
 import tempfile
 import time
 import uuid
@@ -23,6 +24,11 @@ from .memory.manager import MemoryManager, build_memory_manager
 from .nlp_module import KnowledgeBase, NLPModule, SiliconFlowClient
 from .setting import PROJECT_ROOT, configure_logging, load_config
 from .tts_module import BaseTTS, create_tts
+
+try:  # optional dependency for zh conversion
+    from opencc import OpenCC  # type: ignore
+except ImportError:  # pragma: no cover - handled at runtime
+    OpenCC = None  # type: ignore
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .langchain_agent import AgentRunResult, LangChainVoiceAgent
@@ -108,6 +114,77 @@ class ASRSessionStore:
         return entries
 
 
+class TranscriptionPostProcessor:
+    """Apply lightweight cleanup to ASR outputs (simplified, punctuation, filters)."""
+
+    QUESTION_SUFFIXES = ("吗", "么", "呢", "是不是", "好不好", "对不对", "可不可以", "要不要", "能不能")
+    QUESTION_KEYWORDS = ("谁", "什么", "哪", "为何", "为什么", "怎样", "怎么", "多少", "是否", "是不是", "能否")
+    SENTENCE_ENDINGS = ("。", "！", "？", ".", "!", "?")
+
+    def __init__(self, config: Dict[str, Any]) -> None:
+        self.enable_punct = bool(config.get("basic_punctuation"))
+        self.convert_simplified = bool(config.get("convert_to_simplified"))
+        self.forbidden_patterns = self._compile_patterns(config.get("forbidden_phrases") or [])
+        self._opencc = None
+        if self.convert_simplified and OpenCC is not None:
+            try:
+                self._opencc = OpenCC("t2s.json")
+            except Exception:  # pragma: no cover - defensive guard
+                logging.getLogger(__name__).warning("OpenCC initialisation failed; disabling conversion.")
+                self.convert_simplified = False
+
+    @staticmethod
+    def _compile_patterns(phrases: Any) -> list[re.Pattern[str]]:
+        patterns: list[re.Pattern[str]] = []
+        for phrase in phrases:
+            if not isinstance(phrase, str) or not phrase:
+                continue
+            escaped = re.escape(phrase.strip())
+            patterns.append(re.compile(escaped, re.IGNORECASE))
+        return patterns
+
+    def apply_to_text(self, text: str) -> str:
+        cleaned = text or ""
+        if cleaned and self.convert_simplified and self._opencc is not None:
+            try:
+                cleaned = self._opencc.convert(cleaned)
+            except Exception:  # pragma: no cover
+                logging.getLogger(__name__).warning("OpenCC conversion failed; returning original text.")
+        for pattern in self.forbidden_patterns:
+            cleaned = pattern.sub("", cleaned)
+        cleaned = cleaned.strip()
+        if not cleaned:
+            return cleaned
+        if self.enable_punct:
+            cleaned = self._ensure_sentence_punctuation(cleaned)
+        if cleaned and self.convert_simplified and self._opencc is not None:
+            try:
+                cleaned = self._opencc.convert(cleaned)
+            except Exception:  # pragma: no cover
+                logging.getLogger(__name__).warning("OpenCC conversion failed; returning original text.")
+        return cleaned
+
+    def apply_to_segments(self, segments: list[ASRSegment]) -> None:
+        for segment in segments:
+            segment.text = self.apply_to_text(segment.text)
+
+    def apply_to_result(self, result: Any) -> None:
+        result.text = self.apply_to_text(getattr(result, "text", "") or "")
+        segments = getattr(result, "segments", []) or []
+        self.apply_to_segments(segments)
+
+    def _ensure_sentence_punctuation(self, text: str) -> str:
+        if not text:
+            return text
+        last_char = text[-1]
+        if last_char in self.SENTENCE_ENDINGS:
+            return text
+        lowered = text.lower()
+        if any(text.endswith(suffix) for suffix in self.QUESTION_SUFFIXES) or any(keyword in lowered for keyword in self.QUESTION_KEYWORDS):
+            return f"{text}？"
+        return f"{text}。"
+
+
 def _run_transcribe_stream(
     asr_module: ASRModule,
     audio_path: Path,
@@ -120,8 +197,9 @@ def _run_transcribe_stream(
     return segments, result.language, result.duration
 
 
-def build_conversation_manager(config: Dict[str, Any]) -> ConversationManager:
-    asr_cfg = config.get("asr", {})
+def build_conversation_manager(config: Dict[str, Any]) -> tuple[ConversationManager, Dict[str, Any]]:
+    asr_cfg = dict(config.get("asr", {}) or {})
+    postprocess_cfg = asr_cfg.pop("postprocess", {}) or {}
     asr_module = ASRModule(**asr_cfg)
 
     nlp_cfg = config.get("nlp", {})
@@ -165,13 +243,14 @@ def build_conversation_manager(config: Dict[str, Any]) -> ConversationManager:
 
     memory_manager: Optional[MemoryManager] = build_memory_manager(config, llm_client=llm_client)
 
-    return ConversationManager(
+    manager = ConversationManager(
         asr=asr_module,
         nlp=nlp_module,
         tts=tts_module,
         tts_output_dir=config.get("runtime", {}).get("tts_output_dir", PROJECT_ROOT / "logs"),
         memory_manager=memory_manager,
     )
+    return manager, postprocess_cfg
 
 
 def build_agent(manager: ConversationManager, config: Dict[str, Any]):
@@ -194,7 +273,7 @@ def build_agent(manager: ConversationManager, config: Dict[str, Any]):
 def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
     configure_logging()
     config = load_config(config_path)
-    manager = build_conversation_manager(config)
+    manager, postprocess_cfg = build_conversation_manager(config)
     agent = build_agent(manager, config)
 
     app = FastAPI(title="Voice Assistant MCP Server")
@@ -202,6 +281,9 @@ def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
     app.state.agent = agent
     app.state.asr_session_store = ASRSessionStore(PROJECT_ROOT / "logs" / "asr_sessions")
     app.state.asr_lock = asyncio.Lock()
+    app.state.transcription_processor = (
+        TranscriptionPostProcessor(postprocess_cfg) if postprocess_cfg else None
+    )
 
     @app.post("/speech_to_text")
     async def speech_to_text(file: UploadFile = File(...)) -> Dict[str, Any]:
@@ -213,6 +295,9 @@ def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
             result = app.state.manager.asr.transcribe(tmp_path)
         finally:
             tmp_path.unlink(missing_ok=True)
+        processor: Optional[TranscriptionPostProcessor] = app.state.transcription_processor
+        if processor:
+            processor.apply_to_result(result)
         return {
             "text": result.text,
             "language": result.language,
@@ -376,6 +461,10 @@ def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
                     finally:
                         tmp_path.unlink(missing_ok=True)
 
+                    processor: Optional[TranscriptionPostProcessor] = app.state.transcription_processor
+                    if processor:
+                        processor.apply_to_segments(segments)
+                    segments = [seg for seg in segments if seg.text]
                     store.append(session_id, segments, language=language, duration=duration)
                     await websocket.send_text(
                         json.dumps(
