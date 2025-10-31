@@ -1,8 +1,26 @@
-﻿# Core configuration for the voice assistant stack.
+# Core configuration for the voice assistant stack.
 asr:
   model_name: medium
   device: auto
   suppress_silence: true
+  postprocess:
+    convert_to_simplified: true
+    basic_punctuation: true
+    forbidden_phrases:
+      - 整理&字幕小组欢迎订阅我的频道
+      - 欢迎订阅我的频道
+      - 欢迎订阅我的频道哦
+      - 欢迎订阅我的频道啊
+      - 别忘了点赞关注支持明镜栏目
+      - 我们下个视频再见
+      - 我们下一个视频再见
+      - 我們下一個視頻再見
+      - 谢谢观看
+      - 謝謝觀看
+      - 谢谢大家的收看
+      - 謝謝大家的收看
+      - 拜拜
+      - 請不吝點贊訂閱轉發打賞支持明鏡與點點欄目。
 
 nlp:
   siliconflow:
