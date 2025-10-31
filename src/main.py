@@ -24,7 +24,7 @@ def run_server(config_path: Optional[str], host: str, port: int) -> None:
 
 def run_cli(config_path: Optional[str], audio: Optional[str], text: Optional[str]) -> None:
     config = _load_config(config_path)
-    manager = build_conversation_manager(config)
+    manager, _ = build_conversation_manager(config)
     if audio:
         turn = manager.handle_audio(audio)
     elif text:
@@ -44,7 +44,7 @@ def run_agent_cli(
     auto_tts: Optional[bool],
 ) -> None:
     config = _load_config(config_path)
-    manager = build_conversation_manager(config)
+    manager, _ = build_conversation_manager(config)
     agent = build_agent(manager, config)
     if agent is None:
         raise RuntimeError("Agent mode is disabled in the configuration file")
