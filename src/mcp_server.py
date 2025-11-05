@@ -128,7 +128,7 @@ class TranscriptionPostProcessor:
         self._opencc = None
         if self.convert_simplified and OpenCC is not None:
             try:
-                self._opencc = OpenCC("t2s.json")
+                self._opencc = OpenCC("t2s")
             except Exception:  # pragma: no cover - defensive guard
                 logging.getLogger(__name__).warning("OpenCC initialisation failed; disabling conversion.")
                 self.convert_simplified = False
