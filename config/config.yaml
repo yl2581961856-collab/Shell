@@ -20,26 +20,6 @@ asr:
     return_spk_res: true
   generate_kwargs:
     hotword: ""
-  postprocess:
-    convert_to_simplified: true
-    basic_punctuation: false
-    forbidden_phrases:
-      - 整理&字幕小组欢迎订阅我的频道
-      - 欢迎订阅我的频道
-      - 欢迎订阅我的频道哦
-      - 欢迎订阅我的频道啊
-      - 别忘了点赞关注支持明镜栏目
-      - 我们下个视频再见
-      - 我们下一个视频再见
-      - 我們下一個視頻再見
-      - 谢谢观看
-      - 謝謝觀看
-      - 谢谢大家的收看
-      - 謝謝大家的收看
-      - 拜拜
-      - 請不吝點贊訂閱轉發打賞支持明鏡與點點欄目。
-      - 整理&字幕小組歡迎訂閱我的頻道
-      - 请不吝点赞 订阅 转发 打赏支持明镜与点点栏目
 
 nlp:
   siliconflow:
