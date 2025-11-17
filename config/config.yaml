@@ -1,21 +1,26 @@
 # Core configuration for the voice assistant stack.
 
 asr:
-  provider: faster_whisper  # options: faster_whisper, funasr
-  model_name: medium
-  device: auto
-  suppress_silence: true
-  compute_type: auto
-  beam_size: 5
-  chunk_length: null
-  num_workers: null
-  # funasr:
-  #   model: data/models/funasr/SenseVoiceSmall   # 本地 FunASR 模型目录
-  #   vad_model: data/models/funasr/vad           # 可选：本地 VAD 模型目录
-  #   vad_config: data/models/funasr/vad/config.yaml
-  #   device: cuda
-  #   batch_size: 1
-  #   hotword: ""
+  model: iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch
+  vad_model: iic/speech_fsmn_vad_zh-cn-16k-common-pytorch # 产出 vad segments
+  punc_model: iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch  # 提供 punc_array
+  device: cuda
+  language: zh
+  max_chunk_seconds: 8
+  chunk_overlap_seconds: 1.0
+  encoder_chunk_look_back: 4
+  decoder_chunk_look_back: 1
+  sentence_timestamp: true
+  return_raw_text: false
+  speaker:
+    model: iic/speech_campplus_sv_zh-cn_16k-common
+    mode: punc_segment
+    preset_spk_num: 2
+    cb_kwargs:
+      merge_thr: 0.
+    return_spk_res: true
+  generate_kwargs:
+    hotword: ""
 
 nlp:
   siliconflow:
