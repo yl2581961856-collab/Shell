@@ -46,22 +46,34 @@ Plain text query handled by the deterministic pipeline (RAG + LLM + optional TTS
 - **Request**:
 
 ```json
-{ "text": "介绍一下这个语音助手的模块划分" }
+{
+  "mode": "meeting",
+  "session_id": "e52702fea91740169e49355119f550b0",
+  "text": "请整理本次例会的讨论要点和行动项"
+}
 ```
 
-- **Response**:
+- `text` *(string, required)* – user input or transcript to summarise.
+- `mode` *(string, optional, defaults to `normal`)* – send `meeting` to trigger the note-taking persona (otherwise `normal`).
+- `session_id` *(string, required when `mode=meeting`)* – reuse the streaming ASR session id for traceability/log correlation.
+- `system_prompt` / `preset` *(strings, optional)* – legacy overrides that still work but are no longer necessary.
+
+- **Response** (meeting mode always returns JSON):
 
 ```json
 {
-  "text": "系统包含 ASR、NLP、TTS 三个核心模块，并在需要时结合检索结果生成回答。",
-  "audio_path": "logs/tts_123456789.wav",
-  "citations": [
-    {"text": "ASR 模块使用 faster-whisper，并支持 GPU 加速。", "score": 0.73, "metadata": {}}
+  "key_points": [
+    "语音采集模块需要补齐降噪配置",
+    "Q3 版本主打会议纪要体验"
+  ],
+  "action_items": [
+    {"task": "整理降噪选型报告", "owner": "Alice", "due": "2024-08-15"},
+    {"task": "准备会议纪要模板 Demo", "owner": "Bob", "due": null}
   ]
 }
 ```
 
-Set `agent.auto_tts=false` in the configuration if you do not want audio files to be produced automatically.
+Set `agent.auto_tts=false` in the configuration if you do not want audio files to be produced automatically.  Meeting-style summaries simply pass `mode`: "meeting" (plus `session_id`) instead of constructing custom prompts.
 
 ---
 
@@ -130,6 +142,62 @@ All streaming transcripts are persisted to `logs/asr_sessions/<session_id>.jsonl
 ```
 GET /asr_session/<session_id>
 ```
+
+#### LLM Streaming (shared WebSocket)
+
+同一条 `ws://<host>:9090/ws/asr` 连接也承载 LLM 流式输出，所有消息都是 JSON 文本帧并通过 `type` 字段区分。典型流程：
+
+1. 客户端发送 `llm_request`：
+
+```json
+{
+  "type": "llm_request",
+  "session_id": "e52702fea91740169e49355119f550b0",   // meeting 模式必填
+  "request_id": "req-001",                              // 前端自生成，唯一
+  "mode": "meeting",                                    // normal / meeting
+  "text": "请生成本次会议纪要（重点和行动项）",
+  "extra": { "temperature": 0.7, "max_tokens": 512 }
+}
+```
+
+2. 服务端开始推送 `llm_delta`（类似打字机效果）：
+
+```json
+{
+  "type": "llm_delta",
+  "session_id": "e52702fea91740169e49355119f550b0",
+  "request_id": "req-001",
+  "delta": "\"key_points\": [\"语音采集模块需...",
+  "index": 0
+}
+```
+
+3. 所有增量发送完成后，服务端发送 `llm_done`：
+
+```json
+{
+  "type": "llm_done",
+  "session_id": "e52702fea91740169e49355119f550b0",
+  "request_id": "req-001",
+  "reason": "completed",             // completed | cancel | error
+  "final_text": "{\"key_points\": ... }"
+}
+```
+
+4. 如果用户点击“停止”，发送：
+
+```json
+{ "type": "llm_cancel", "session_id": "e52702fea91740169e49355119f550b0", "request_id": "req-001" }
+```
+
+收到后服务端会立刻广播 `llm_done (reason="cancel")`。当请求参数缺失或同一 `session_id` 已有活跃生成时，会返回 `llm_error`（包含 `code`/`message`）。
+
+注意事项：
+
+- `request_id` 完成整个生命周期：`llm_request → llm_delta* → llm_done`。无需 delta 的情况会直接 `llm_done`。
+- meeting 模式必须携带 `session_id`，用来关联到对应的语音会话；普通模式可选。
+- `extra` 仅接受白名单参数（`temperature`、`top_p`、`max_tokens`）。
+- 每个 `session_id` 同时只允许一个活跃的生成；新的请求会收到 `llm_error (code="busy")`，可先 `llm_cancel` 再发起。
 
 ---
 

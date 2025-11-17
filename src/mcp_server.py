@@ -11,7 +11,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 import numpy as np
@@ -36,6 +36,10 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 class ChatRequest(BaseModel):
     text: str
+    mode: Literal["normal", "meeting"] = "normal"
+    session_id: Optional[str] = None
+    system_prompt: Optional[str] = None
+    preset: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -55,6 +59,164 @@ class AgentChatResponse(BaseModel):
     audio_path: Optional[str]
     citations: list[Any]
     tools: list[str]
+
+
+PRESET_SYSTEM_PROMPTS: dict[str, str] = {
+    "meeting": """你是会议纪要助手。输出要求：
+1. 不展示推理/思考过程，只输出最终结果。
+2. 仅返回合法 JSON 字符串，结构如下：
+   {
+     "key_points": ["重点1", "重点2"],
+     "action_items": [
+       {"task": "事项", "owner": "负责人", "due": "截止时间(无则 null)"}
+     ]
+   }
+3. key_points 数组列出会议讨论重点，措辞简洁。
+4. action_items 只保留真实行动项，缺少负责人或截止时间时填 null。
+5. 原文无关或为噪声时返回 {\"key_points\": [], \"action_items\": []}。
+""",
+}
+
+
+def _resolve_system_prompt(mode: str, system_prompt: Optional[str], preset: Optional[str]) -> Optional[str]:
+    if system_prompt:
+        return system_prompt
+    if preset:
+        preset_key = preset.strip().lower()
+        if preset_key:
+            resolved = PRESET_SYSTEM_PROMPTS.get(preset_key)
+            if resolved:
+                return resolved
+    if mode == "meeting":
+        return PRESET_SYSTEM_PROMPTS.get("meeting")
+    return None
+
+
+def _extract_llm_generation_kwargs(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not raw:
+        return {}
+    generation: Dict[str, Any] = {}
+    if raw.get("temperature") is not None:
+        try:
+            generation["temperature"] = float(raw["temperature"])
+        except (TypeError, ValueError):
+            pass
+    if raw.get("top_p") is not None:
+        try:
+            generation["top_p"] = float(raw["top_p"])
+        except (TypeError, ValueError):
+            pass
+    if raw.get("max_tokens") is not None:
+        try:
+            generation["max_tokens"] = int(raw["max_tokens"])
+        except (TypeError, ValueError):
+            pass
+    return generation
+
+
+def _chunk_text(text: str, max_chars: int = 60) -> List[str]:
+    text = text or ""
+    if not text:
+        return []
+    chunks: List[str] = []
+    start = 0
+    length = len(text)
+    while start < length:
+        end = min(length, start + max_chars)
+        chunks.append(text[start:end])
+        start = end
+    return chunks
+
+
+async def _llm_stream_task(
+    manager: ConversationManager,
+    websocket: WebSocket,
+    *,
+    request_id: str,
+    session_id: Optional[str],
+    text: str,
+    prompt_override: Optional[str],
+    generation_kwargs: Optional[Dict[str, Any]],
+) -> None:
+    loop = asyncio.get_running_loop()
+    final_text = ""
+
+    def run_generation() -> str:
+        turn = manager.handle_text(
+            text,
+            system_prompt=prompt_override,
+            generation_kwargs=generation_kwargs,
+        )
+        return turn.assistant_text
+
+    try:
+        assistant_text = await loop.run_in_executor(None, run_generation)
+        final_text = assistant_text or ""
+        for idx, delta in enumerate(_chunk_text(final_text)):
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "llm_delta",
+                        "session_id": session_id,
+                        "request_id": request_id,
+                        "delta": delta,
+                        "index": idx,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "llm_done",
+                    "session_id": session_id,
+                    "request_id": request_id,
+                    "reason": "completed",
+                    "final_text": final_text,
+                },
+                ensure_ascii=False,
+            )
+        )
+    except asyncio.CancelledError:
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "llm_done",
+                    "session_id": session_id,
+                    "request_id": request_id,
+                    "reason": "cancel",
+                    "final_text": final_text,
+                },
+                ensure_ascii=False,
+            )
+        )
+        raise
+    except Exception as exc:  # pragma: no cover - defensive handling
+        logging.getLogger(__name__).exception("LLM streaming failed")
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "llm_error",
+                    "session_id": session_id,
+                    "request_id": request_id,
+                    "code": "server_error",
+                    "message": str(exc),
+                },
+                ensure_ascii=False,
+            )
+        )
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "llm_done",
+                    "session_id": session_id,
+                    "request_id": request_id,
+                    "reason": "error",
+                    "final_text": final_text,
+                },
+                ensure_ascii=False,
+            )
+        )
 
 
 class ASRSessionStore:
@@ -81,7 +243,13 @@ class ASRSessionStore:
             "language": language,
             "duration": duration,
             "segments": [
-                {"text": seg.text, "start": seg.start, "end": seg.end} for seg in segments
+                {
+                    "text": seg.text,
+                    "start": seg.start,
+                    "end": seg.end,
+                    "speaker": seg.speaker,
+                }
+                for seg in segments
             ],
         }
         self._sessions.setdefault(session_id, []).append(entry)
@@ -204,17 +372,25 @@ def build_conversation_manager(config: Dict[str, Any]) -> tuple[ConversationMana
 
     nlp_cfg = config.get("nlp", {})
     llm_cfg = nlp_cfg.get("siliconflow") or nlp_cfg.get("deepseek", {})
-    if not llm_cfg.get("api_key"):
-        raise RuntimeError("SiliconFlow/DeepSeek API key missing in configuration")
+    if not llm_cfg:
+        raise RuntimeError("Missing LLM configuration under nlp.siliconflow")
     if "deepseek" in nlp_cfg and "siliconflow" not in nlp_cfg:
         logger = logging.getLogger(__name__)
         logger.warning(
             "Configuration key nlp.deepseek is deprecated. Rename it to nlp.siliconflow to silence this message."
         )
+    api_key = llm_cfg.get("api_key")
+    base_url = llm_cfg.get("base_url", "https://api.siliconflow.cn")
+    if not api_key:
+        logging.getLogger(__name__).info(
+            "No LLM api_key configured; sending requests to %s without Authorization header", base_url
+        )
     llm_client = SiliconFlowClient(
-        api_key=llm_cfg["api_key"],
+        api_key=api_key,
         model=llm_cfg.get("model", "deepseek-r1"),
-        base_url=llm_cfg.get("base_url", "https://api.siliconflow.cn"),
+        base_url=base_url,
+        timeout=llm_cfg.get("timeout", 120),
+        headers=llm_cfg.get("headers"),
     )
 
     knowledge_cfg = nlp_cfg.get("knowledge_base", {})
@@ -309,7 +485,14 @@ def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
     async def chat(payload: ChatRequest) -> ChatResponse:
         if not payload.text.strip():
             raise HTTPException(status_code=400, detail="Text must not be empty")
-        turn = app.state.manager.handle_text(payload.text)
+
+        mode = payload.mode or "normal"
+        if mode == "meeting" and not payload.session_id:
+            raise HTTPException(status_code=400, detail="session_id is required for meeting mode")
+
+        prompt_override = _resolve_system_prompt(mode, payload.system_prompt, payload.preset)
+
+        turn = app.state.manager.handle_text(payload.text, system_prompt=prompt_override)
         citations = [citation.__dict__ for citation in turn.citations]
         return ChatResponse(
             text=turn.assistant_text,
@@ -365,9 +548,24 @@ def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
         buffer = bytearray()
         cached_language: Optional[str] = None
         current_sample_rate = 16000
-        await websocket.send_text(
-            json.dumps({"type": "ready", "session_id": session_id}, ensure_ascii=False)
-        )
+        llm_tasks: Dict[str, asyncio.Task] = {}
+        llm_session_active: Dict[str, str] = {}
+
+        async def send_json(payload: Dict[str, Any]) -> None:
+            await websocket.send_text(json.dumps(payload, ensure_ascii=False))
+
+        def cleanup_task(task: asyncio.Task, request_ref: str, session_ref: Optional[str]) -> None:
+            llm_tasks.pop(request_ref, None)
+            if session_ref and llm_session_active.get(session_ref) == request_ref:
+                llm_session_active.pop(session_ref, None)
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logging.getLogger(__name__).exception("LLM task %s failed", request_ref)
+
+        await send_json({"type": "ready", "session_id": session_id})
 
         try:
             while True:
@@ -480,11 +678,115 @@ def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
                                     "text": segment.text,
                                     "start": segment.start,
                                     "end": segment.end,
+                                    "speaker": segment.speaker,
                                 },
                                 ensure_ascii=False,
                             )
                         )
                     await websocket.send_text(json.dumps({"type": "flush_complete"}))
+                elif msg_type == "llm_request":
+                    request_id = str(payload.get("request_id") or "").strip()
+                    text_input = (payload.get("text") or "").strip()
+                    if not request_id:
+                        await send_json(
+                            {
+                                "type": "llm_error",
+                                "code": "missing_request_id",
+                                "message": "Field request_id is required",
+                            }
+                        )
+                        continue
+                    if not text_input:
+                        await send_json(
+                            {
+                                "type": "llm_error",
+                                "code": "empty_text",
+                                "message": "Text must not be empty",
+                                "request_id": request_id,
+                            }
+                        )
+                        continue
+                    if request_id in llm_tasks:
+                        await send_json(
+                            {
+                                "type": "llm_error",
+                                "code": "duplicate_request",
+                                "message": f"Request {request_id} already in progress",
+                                "request_id": request_id,
+                            }
+                        )
+                        continue
+                    mode = str(payload.get("mode") or "normal").strip().lower()
+                    llm_session_id = payload.get("session_id")
+                    if mode == "meeting" and not llm_session_id:
+                        await send_json(
+                            {
+                                "type": "llm_error",
+                                "code": "missing_session",
+                                "message": "meeting mode requires session_id",
+                                "request_id": request_id,
+                            }
+                        )
+                        continue
+                    if llm_session_id:
+                        active_request = llm_session_active.get(llm_session_id)
+                        if active_request and active_request != request_id:
+                            await send_json(
+                                {
+                                    "type": "llm_error",
+                                    "code": "busy",
+                                    "message": "Another generation is running for this session",
+                                    "session_id": llm_session_id,
+                                    "request_id": request_id,
+                                }
+                            )
+                            continue
+                    prompt_override = _resolve_system_prompt(
+                        mode,
+                        payload.get("system_prompt"),
+                        payload.get("preset"),
+                    )
+                    generation_kwargs = _extract_llm_generation_kwargs(payload.get("extra"))
+                    task = asyncio.create_task(
+                        _llm_stream_task(
+                            app.state.manager,
+                            websocket,
+                            request_id=request_id,
+                            session_id=llm_session_id,
+                            text=text_input,
+                            prompt_override=prompt_override,
+                            generation_kwargs=generation_kwargs or None,
+                        )
+                    )
+                    llm_tasks[request_id] = task
+                    if llm_session_id:
+                        llm_session_active[llm_session_id] = request_id
+                    task.add_done_callback(
+                        lambda t, req=request_id, sess=llm_session_id: cleanup_task(t, req, sess)
+                    )
+                elif msg_type == "llm_cancel":
+                    request_id = str(payload.get("request_id") or "").strip()
+                    if not request_id:
+                        await send_json(
+                            {
+                                "type": "llm_error",
+                                "code": "missing_request_id",
+                                "message": "request_id is required for cancellation",
+                            }
+                        )
+                        continue
+                    task = llm_tasks.get(request_id)
+                    if not task:
+                        await send_json(
+                            {
+                                "type": "llm_error",
+                                "code": "unknown_request",
+                                "message": f"No active generation for {request_id}",
+                                "request_id": request_id,
+                            }
+                        )
+                        continue
+                    task.cancel()
                 elif msg_type == "reset":
                     buffer.clear()
                     cached_language = None
@@ -512,5 +814,12 @@ def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
                 await websocket.close(code=1011, reason="internal error")
         finally:
             buffer.clear()
+            for task in list(llm_tasks.values()):
+                task.cancel()
+            llm_tasks.clear()
+            llm_session_active.clear()
 
     return app
+
+
+app = create_app()

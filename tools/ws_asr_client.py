@@ -1,4 +1,4 @@
-﻿"""Simple WebSocket client to demo streaming ASR with faster-whisper.
+"""Simple WebSocket client to demo streaming ASR with FunASR Paraformer.
 
 Usage examples:
     # Stream from a WAV file
@@ -44,9 +44,11 @@ async def _receiver(ws: websockets.WebSocketClientProtocol) -> None:
                 continue
             msg_type = payload.get("type")
             if msg_type == "segment":
+                speaker = payload.get("speaker")
+                speaker_hint = f" [spk={speaker}]" if speaker else ""
                 print(
-                    f"[segment] {payload.get('start', 0.0):.2f}s → "
-                    f"{payload.get('end', 0.0):.2f}s : {payload.get('text', '')}"
+                    f"[segment] {payload.get('start', 0.0):.2f}s -> "
+                    f"{payload.get('end', 0.0):.2f}s : {payload.get('text', '')}{speaker_hint}"
                 )
             elif msg_type == "metadata":
                 print(
@@ -269,3 +271,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

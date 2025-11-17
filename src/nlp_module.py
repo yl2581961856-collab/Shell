@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 try:
     import requests
@@ -124,32 +124,54 @@ class KnowledgeBase:
 
 
 class SiliconFlowClient:
-    """HTTP client for SiliconFlow-hosted OpenAI-compatible chat APIs."""
+    """HTTP client for OpenAI-compatible chat APIs (SiliconFlow, Qwen, etc.)."""
 
-    def __init__(self, api_key: str, model: str, base_url: str = "https://api.siliconflow.cn") -> None:
-        self.api_key = api_key
+    def __init__(
+        self,
+        api_key: Optional[str],
+        model: str,
+        base_url: str = "https://api.siliconflow.cn",
+        *,
+        timeout: float = 120,
+        headers: Optional[dict] = None,
+    ) -> None:
+        self.api_key = (api_key or "").strip()
         self.model = model
-        self.base_url = base_url.rstrip("/")
+        cleaned_base = (base_url or "https://api.siliconflow.cn").strip()
+        self.base_url = cleaned_base.rstrip("/") or "https://api.siliconflow.cn"
+        self.timeout = float(timeout or 120)
+        self.default_headers = dict(headers or {})
 
-    def chat(self, messages: Sequence[dict], temperature: float = 0.6, top_p: float = 0.9) -> str:
+    def chat(
+        self,
+        messages: Sequence[dict],
+        *,
+        temperature: float = 0.6,
+        top_p: float = 0.9,
+        max_tokens: Optional[int] = None,
+    ) -> str:
         if self.base_url.endswith("/v1"):
             url = f"{self.base_url}/chat/completions"
         else:
             url = f"{self.base_url}/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json", **self.default_headers}
+        if self.api_key:
+            headers.setdefault("Authorization", f"Bearer {self.api_key}")
         payload = {
             "model": self.model,
             "messages": list(messages),
             "temperature": temperature,
             "top_p": top_p,
         }
-        response = requests.post(url, json=payload, headers=headers, timeout=120)
+        if max_tokens is not None:
+            payload["max_tokens"] = int(max_tokens)
+        response = requests.post(url, json=payload, headers=headers, timeout=self.timeout)
         if response.status_code >= 400:
-            raise RuntimeError(f"DeepSeek API error {response.status_code}: {response.text}")
-        data = response.json()
+            raise RuntimeError(f"Chat backend error {response.status_code}: {response.text}")
+        try:
+            data = response.json()
+        except ValueError as exc:  # pragma: no cover - defensive guard
+            raise RuntimeError(f"Chat backend returned invalid JSON: {response.text[:200]}") from exc
         return data["choices"][0]["message"]["content"].strip()
 
 
@@ -174,9 +196,12 @@ class NLPModule:
         context: Optional[str],
         memory_context: Optional[str],
         retrieved: Iterable[RetrievalResult],
+        *,
+        system_prompt: Optional[str] = None,
     ) -> List[dict]:
+        prompt = system_prompt or self.system_prompt
         messages: List[dict] = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": prompt},
         ]
         if context:
             messages.append({"role": "user", "content": f"Conversation history:\n{context}"})
@@ -196,11 +221,27 @@ class NLPModule:
         chat_history: Optional[str] = None,
         memory_context: Optional[str] = None,
         top_k: int = 4,
+        system_prompt: Optional[str] = None,
+        generation_kwargs: Optional[Dict[str, Any]] = None,
     ) -> NLPResult:
         retrieved: List[RetrievalResult] = []
         if self.knowledge_base:
             retrieved = self.knowledge_base.search(query, top_k=top_k)
-        messages = self._build_messages(query, chat_history, memory_context, retrieved)
-        answer = self.llm.chat(messages)
-        return NLPResult(answer=answer, citations=retrieved)
+        messages = self._build_messages(
+            query,
+            chat_history,
+            memory_context,
+            retrieved,
+            system_prompt=system_prompt,
+        )
+        llm_params: Dict[str, Any] = {}
+        if generation_kwargs:
+            if generation_kwargs.get("temperature") is not None:
+                llm_params["temperature"] = float(generation_kwargs["temperature"])
+            if generation_kwargs.get("top_p") is not None:
+                llm_params["top_p"] = float(generation_kwargs["top_p"])
+            if generation_kwargs.get("max_tokens") is not None:
+                llm_params["max_tokens"] = int(generation_kwargs["max_tokens"])
 
+        answer = self.llm.chat(messages, **llm_params)
+        return NLPResult(answer=answer, citations=retrieved)

@@ -5,7 +5,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from .asr_module import ASRModule, ASRResult
 from .memory.manager import MemoryManager
@@ -97,7 +97,13 @@ class ConversationManager:
         asr_result = self.asr.transcribe(audio_path)
         return self.handle_text(asr_result)
 
-    def handle_text(self, asr_result: ASRResult | str) -> ConversationTurn:
+    def handle_text(
+        self,
+        asr_result: ASRResult | str,
+        *,
+        system_prompt: Optional[str] = None,
+        generation_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> ConversationTurn:
         if isinstance(asr_result, str):
             user_text = asr_result
             asr_metadata = None
@@ -115,6 +121,8 @@ class ConversationManager:
             user_text,
             chat_history=chat_history,
             memory_context=memory_context,
+            system_prompt=system_prompt,
+            generation_kwargs=generation_kwargs,
         )
 
         tts_response: Optional[TTSResponse] = None
@@ -147,5 +155,3 @@ class ConversationManager:
         out_path.write_text(transcript, encoding="utf-8")
         logger.info("Transcript exported to %s", out_path)
         return out_path
-
-

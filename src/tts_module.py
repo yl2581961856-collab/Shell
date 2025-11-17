@@ -294,7 +294,7 @@ class CosyVoiceTTS:
         return audio_np, sample_rate
 
 
-def create_tts(provider_config: dict) -> BaseTTS:
+def create_tts(provider_config: dict) -> BaseTTS: 
     """Factory that returns a configured TTS backend based on ``provider_config``."""
 
     provider = (provider_config or {}).get("provider", "higgs").lower()

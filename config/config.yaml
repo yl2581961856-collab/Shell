@@ -1,11 +1,28 @@
-# Core configuration for the voice assistant stack.
+﻿# Core configuration for the voice assistant stack.
 asr:
-  model_name: medium
-  device: auto
-  suppress_silence: true
+  model: iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch
+  vad_model: iic/speech_fsmn_vad_zh-cn-16k-common-pytorch # 产出 vad segments
+  punc_model: iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch  # 提供 punc_array
+  device: cuda
+  language: zh
+  max_chunk_seconds: 8
+  chunk_overlap_seconds: 1.0
+  encoder_chunk_look_back: 4
+  decoder_chunk_look_back: 1
+  sentence_timestamp: true
+  return_raw_text: false
+  speaker:
+    model: iic/speech_campplus_sv_zh-cn_16k-common
+    mode: punc_segment
+    preset_spk_num: 2
+    cb_kwargs:
+      merge_thr: 0.
+    return_spk_res: true
+  generate_kwargs:
+    hotword: ""
   postprocess:
     convert_to_simplified: true
-    basic_punctuation: true
+    basic_punctuation: false
     forbidden_phrases:
       - 整理&字幕小组欢迎订阅我的频道
       - 欢迎订阅我的频道
@@ -26,9 +43,9 @@ asr:
 
 nlp:
   siliconflow:
-    api_key: "${SILICONFLOW_API_KEY}"
-    model: deepseek-ai/DeepSeek-R1
-    base_url: https://api.siliconflow.cn/v1
+    api_key: ""  # Local Qwen endpoint does not require a key
+    model: qwen3-32b-fp8
+    base_url: http://192.168.11.151:8091
 
   knowledge_base:
     enabled: true

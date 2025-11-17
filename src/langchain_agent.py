@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class SiliconFlowChatModel(BaseChatModel):
-    """Adapter that allows using SiliconFlowClient through LangChain."""
+    """Adapter that allows using SiliconFlowClient (OpenAI-compatible backends) through LangChain."""
 
     def __init__(self, client, *, temperature: float = 0.6, top_p: float = 0.9) -> None:  # noqa: ANN001
         super().__init__(temperature=temperature, top_p=top_p)
@@ -39,7 +39,7 @@ class SiliconFlowChatModel(BaseChatModel):
 
     @property
     def _llm_type(self) -> str:
-        return "siliconflow-chat"
+        return "chat-backend"
 
     def _generate(  # type: ignore[override]
         self,
@@ -62,7 +62,7 @@ class SiliconFlowChatModel(BaseChatModel):
 
         temperature = kwargs.get("temperature", self.temperature)
         top_p = kwargs.get("top_p", self.top_p)
-        logger.debug("Calling SiliconFlow via LangChain temperature=%s top_p=%s", temperature, top_p)
+        logger.debug("Calling chat backend via LangChain temperature=%s top_p=%s", temperature, top_p)
         text = self.client.chat(payload, temperature=temperature, top_p=top_p)
         if stop:
             for token in stop:
@@ -244,7 +244,6 @@ class LangChainVoiceAgent:
         self._last_audio_path = None
         self._last_citations = []
         self._tool_events.clear()
-
 
 
 
