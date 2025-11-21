@@ -43,6 +43,7 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    session_id: str
     text: str
     audio_path: Optional[str]
     citations: list[Any]
@@ -59,6 +60,31 @@ class AgentChatResponse(BaseModel):
     audio_path: Optional[str]
     citations: list[Any]
     tools: list[str]
+
+
+class SessionCreateRequest(BaseModel):
+    mode: Literal["normal", "meeting"] = "normal"
+    session_id: Optional[str] = None
+    title: Optional[str] = None
+
+
+class SessionSummary(BaseModel):
+    session_id: str
+    title: str
+    mode: Literal["normal", "meeting"]
+    created_at: float
+    updated_at: float
+    turns_count: int
+    has_asr: bool
+
+
+class SessionDetail(BaseModel):
+    session_id: str
+    title: str
+    mode: Literal["normal", "meeting"]
+    created_at: float
+    updated_at: float
+    turns: List[Dict[str, Any]]
 
 
 PRESET_SYSTEM_PROMPTS: dict[str, str] = {
@@ -126,6 +152,34 @@ def _chunk_text(text: str, max_chars: int = 60) -> List[str]:
         chunks.append(text[start:end])
         start = end
     return chunks
+
+
+def _derive_session_title(existing: Optional[str], turns: List[Dict[str, Any]]) -> str:
+    default_title = existing or "新的对话"
+    if existing and existing.strip() and existing.strip() != "新的对话":
+        return existing
+    for turn in turns:
+        user_text = (turn.get("user_text") or "").strip()
+        if user_text:
+            snippet = user_text[:40]
+            if len(user_text) > 40:
+                snippet += "..."
+            return snippet
+    return default_title
+
+
+def _build_session_summary(payload: Dict[str, Any], has_asr: bool) -> SessionSummary:
+    created = float(payload.get("created_at", time.time()))
+    updated = float(payload.get("updated_at", created))
+    return SessionSummary(
+        session_id=payload.get("session_id", ""),
+        title=payload.get("title") or "新的对话",
+        mode=payload.get("mode", "normal"),
+        created_at=created,
+        updated_at=updated,
+        turns_count=len(payload.get("turns") or []),
+        has_asr=has_asr,
+    )
 
 
 async def _llm_stream_task(
@@ -280,6 +334,90 @@ class ASRSessionStore:
                     continue
         self._sessions[session_id] = entries
         return entries
+
+    def exists(self, session_id: str) -> bool:
+        return session_id in self._sessions or self._file_path(session_id).exists()
+
+
+class ChatHistoryStore:
+    """Persist structured chat history for each session."""
+
+    def __init__(self, base_dir: Path) -> None:
+        self.base_dir = base_dir
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+        self._cache: Dict[str, Dict[str, Any]] = {}
+
+    def _file_path(self, session_id: str) -> Path:
+        return self.base_dir / f"{session_id}.json"
+
+    def _write(self, session_id: str, payload: Dict[str, Any]) -> None:
+        tmp_path = self._file_path(session_id).with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(self._file_path(session_id))
+        self._cache[session_id] = payload
+
+    def ensure(self, session_id: Optional[str], *, mode: str, title: Optional[str] = None) -> Dict[str, Any]:
+        sid = session_id or uuid.uuid4().hex
+        existing = self.get(sid)
+        if existing:
+            if title:
+                existing["title"] = title
+                self._write(sid, existing)
+            return existing
+        now = time.time()
+        payload: Dict[str, Any] = {
+            "session_id": sid,
+            "mode": mode,
+            "title": title or "新的对话",
+            "created_at": now,
+            "updated_at": now,
+            "turns": [],
+        }
+        self._write(sid, payload)
+        return payload
+
+    def get(self, session_id: str) -> Optional[Dict[str, Any]]:
+        if session_id in self._cache:
+            return self._cache[session_id]
+        path = self._file_path(session_id)
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+        self._cache[session_id] = payload
+        return payload
+
+    def save_turns(
+        self,
+        session_id: str,
+        *,
+        mode: str,
+        title: Optional[str],
+        turns: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        session = self.ensure(session_id, mode=mode)
+        if title:
+            session["title"] = title
+        session["mode"] = mode
+        session["turns"] = turns
+        session["updated_at"] = time.time()
+        session.setdefault("created_at", session["updated_at"])
+        self._write(session_id, session)
+        return session
+
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        sessions: List[Dict[str, Any]] = []
+        for path in self.base_dir.glob("*.json"):
+            session_id = path.stem
+            data = self.get(session_id)
+            if not data:
+                continue
+            sessions.append(data)
+        sessions.sort(key=lambda item: item.get("updated_at", 0), reverse=True)
+        return sessions
+
 
 
 class TranscriptionPostProcessor:
@@ -456,6 +594,7 @@ def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
     app.state.manager = manager
     app.state.agent = agent
     app.state.asr_session_store = ASRSessionStore(PROJECT_ROOT / "logs" / "asr_sessions")
+    app.state.chat_history_store = ChatHistoryStore(PROJECT_ROOT / "logs" / "chat_history")
     app.state.asr_lock = asyncio.Lock()
     app.state.transcription_processor = (
         TranscriptionPostProcessor(postprocess_cfg) if postprocess_cfg else None
@@ -491,13 +630,60 @@ def create_app(config_path: Optional[str | Path] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="session_id is required for meeting mode")
 
         prompt_override = _resolve_system_prompt(mode, payload.system_prompt, payload.preset)
+        history_store: ChatHistoryStore = app.state.chat_history_store
+        session = history_store.ensure(payload.session_id, mode=mode)
+        session_id = session["session_id"]
+        app.state.manager.load_history(session_id, session.get("turns"))
 
         turn = app.state.manager.handle_text(payload.text, system_prompt=prompt_override)
         citations = [citation.__dict__ for citation in turn.citations]
+        turns_payload = [t.to_dict() for t in app.state.manager.state.turns]
+        title = _derive_session_title(session.get("title"), turns_payload)
+        history_store.save_turns(
+            session_id,
+            mode=mode,
+            title=title,
+            turns=turns_payload,
+        )
         return ChatResponse(
+            session_id=session_id,
             text=turn.assistant_text,
             audio_path=str(turn.audio) if turn.audio else None,
             citations=citations,
+        )
+
+    @app.post("/session/new", response_model=SessionSummary)
+    async def create_session_endpoint(payload: SessionCreateRequest) -> SessionSummary:
+        mode = payload.mode or "normal"
+        history_store: ChatHistoryStore = app.state.chat_history_store
+        session = history_store.ensure(payload.session_id, mode=mode, title=payload.title)
+        asr_store: ASRSessionStore = app.state.asr_session_store
+        return _build_session_summary(session, asr_store.exists(session["session_id"]))
+
+    @app.get("/session/list", response_model=List[SessionSummary])
+    async def list_sessions() -> List[SessionSummary]:
+        history_store: ChatHistoryStore = app.state.chat_history_store
+        asr_store: ASRSessionStore = app.state.asr_session_store
+        summaries: List[SessionSummary] = []
+        for session in history_store.list_sessions():
+            summaries.append(_build_session_summary(session, asr_store.exists(session["session_id"])))
+        return summaries
+
+    @app.get("/session/{session_id}", response_model=SessionDetail)
+    async def get_session_detail(session_id: str) -> SessionDetail:
+        history_store: ChatHistoryStore = app.state.chat_history_store
+        session = history_store.get(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        created = float(session.get("created_at", time.time()))
+        updated = float(session.get("updated_at", created))
+        return SessionDetail(
+            session_id=session_id,
+            title=session.get("title") or "新的对话",
+            mode=session.get("mode", "normal"),
+            created_at=created,
+            updated_at=updated,
+            turns=session.get("turns", []),
         )
 
     @app.post("/agent_chat", response_model=AgentChatResponse)

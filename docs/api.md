@@ -41,7 +41,7 @@ curl -X POST http://localhost:9090/speech_to_text \
 
 ### `POST /chat`
 
-Plain text query handled by the deterministic pipeline (RAG + LLM + optional TTS).
+Plain text query handled by the deterministic pipeline (RAG + LLM + optional TTS) 并会持久化到 `logs/chat_history/<session_id>.json`。
 
 - **Request**:
 
@@ -49,31 +49,45 @@ Plain text query handled by the deterministic pipeline (RAG + LLM + optional TTS
 {
   "mode": "meeting",
   "session_id": "e52702fea91740169e49355119f550b0",
-  "text": "请整理本次例会的讨论要点和行动项"
+  "text": "�������������������Ҫ����ж���"
 }
 ```
 
-- `text` *(string, required)* – user input or transcript to summarise.
-- `mode` *(string, optional, defaults to `normal`)* – send `meeting` to trigger the note-taking persona (otherwise `normal`).
-- `session_id` *(string, required when `mode=meeting`)* – reuse the streaming ASR session id for traceability/log correlation.
-- `system_prompt` / `preset` *(strings, optional)* – legacy overrides that still work but are no longer necessary.
+- `text` *(string, required)* – 用户输入或需要总结的内容。
+- `mode` *(string, optional, defaults to `normal`)* – `meeting` 触发纪要助手，否则为普通模式。
+- `session_id` *(string)* – `meeting` 模式必须传；普通模式可省略，服务器会分配一个新的 ID 并在响应里返回。
+- `system_prompt` / `preset` *(strings, optional)* – 可覆盖默认提示词。
 
-- **Response** (meeting mode always returns JSON):
+- **Response**:
 
 ```json
 {
-  "key_points": [
-    "语音采集模块需要补齐降噪配置",
-    "Q3 版本主打会议纪要体验"
-  ],
-  "action_items": [
-    {"task": "整理降噪选型报告", "owner": "Alice", "due": "2024-08-15"},
-    {"task": "准备会议纪要模板 Demo", "owner": "Bob", "due": null}
-  ]
+  "session_id": "e52702fea91740169e49355119f550b0",
+  "text": "{\"key_points\":[\"……\"],\"action_items\":[...]}",
+  "audio_path": null,
+  "citations": []
 }
 ```
 
-Set `agent.auto_tts=false` in the configuration if you do not want audio files to be produced automatically.  Meeting-style summaries simply pass `mode`: "meeting" (plus `session_id`) instead of constructing custom prompts.
+响应体新增 `session_id`，请在前端缓存该值并在后续 `/chat` 调用中一并携带。会议模式仍与 `/ws/asr` 的实时字幕使用同一个 `session_id`。
+
+---
+
+### Session Management (`/session/*`)
+
+所有对话共用一个 `session_id`。普通聊天和会议纪要只是“同一个 ID，不同的数据源”：
+
+- `logs/chat_history/<id>.json` – 用户与助手的对话历史（用于侧边栏）。
+- `logs/asr_sessions/<id>.jsonl` – 会议的原始字幕，仅当使用过 `/ws/asr` 时存在。
+
+相关接口：
+
+1. **`POST /session/new`** – 创建/注册一个会话。支持 `mode`（默认 `normal`）、`title`，以及可选 `session_id`（例如复用 `/ws/asr` 的 ID）。返回 `SessionSummary`。
+2. **`GET /session/list`** – 枚举所有会话摘要，包含 `session_id`、标题、模式、turn 数、时间戳以及 `has_asr` 标记。
+3. **`GET /session/{id}`** – 根据 ID 读取完整的对话 turn 列表，供前端点击历史记录时回显。
+4. **`GET /asr_session/{id}`** – 旧接口，读取会议原始字幕；只有当 `has_asr=true` 时才展示“查看原始速记”按钮。
+
+推荐前端流程：打开页面先调用 `/session/list` 渲染侧边栏；“新建对话”命中 `/session/new` 并保存返回的 `session_id`；发送消息时 `POST /chat` 带上该 ID；点击历史记录时调用 `/session/{id}` 填充对话内容。
 
 ---
 

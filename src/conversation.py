@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from .asr_module import ASRModule, ASRResult
 from .memory.manager import MemoryManager
@@ -22,6 +22,31 @@ class ConversationTurn:
     citations: List[RetrievalResult] = field(default_factory=list)
     audio: Optional[Path] = None
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serialisable representation."""
+        return {
+            "user_text": self.user_text,
+            "assistant_text": self.assistant_text,
+            "citations": [asdict(citation) for citation in self.citations],
+            "audio": str(self.audio) if self.audio else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "ConversationTurn":
+        citations = [
+            RetrievalResult(**citation)
+            for citation in payload.get("citations", [])
+            if isinstance(citation, dict)
+        ]
+        audio_path = payload.get("audio")
+        audio: Optional[Path] = Path(audio_path) if audio_path else None
+        return cls(
+            user_text=payload.get("user_text", ""),
+            assistant_text=payload.get("assistant_text", ""),
+            citations=citations,
+            audio=audio,
+        )
+
 
 @dataclass
 class ConversationState:
@@ -34,6 +59,16 @@ class ConversationState:
             parts.append(f"User: {turn.user_text}")
             parts.append(f"Assistant: {turn.assistant_text}")
         return "\n".join(parts)
+
+    def replace(self, *, session_id: str, turns: Iterable[ConversationTurn]) -> None:
+        self.session_id = session_id
+        self.turns = list(turns)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "turns": [turn.to_dict() for turn in self.turns],
+        }
 
 
 class ConversationManager:
@@ -56,6 +91,13 @@ class ConversationManager:
         self.tts_output_dir = Path(tts_output_dir)
         self.memory_manager = memory_manager
         logger.info("Conversation manager initialized session=%s", self.state.session_id)
+
+    def load_history(self, session_id: str, turns_payload: Optional[List[Dict[str, Any]]] = None) -> None:
+        """Replace the current conversation state with persisted turns."""
+        turns: List[ConversationTurn] = []
+        if turns_payload:
+            turns = [ConversationTurn.from_dict(item) for item in turns_payload]
+        self.state.replace(session_id=session_id, turns=turns)
 
     def _update_state(
         self,
