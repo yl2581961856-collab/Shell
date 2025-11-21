@@ -28,7 +28,7 @@ nlp:
     base_url: http://192.168.11.151:8091
 
   knowledge_base:
-    enabled: true
+    enabled: false
     embedding_model: sentence-transformers/paraphrase-multilingual-mpnet-base-v2
     index_path: models/embeddings/knowledge_base.json
   system_prompt: |
@@ -90,3 +90,4 @@ memory:
 mcp:
   host: 0.0.0.0
   port: 9090
+
