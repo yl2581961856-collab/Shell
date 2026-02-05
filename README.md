@@ -19,7 +19,7 @@ This repository is intentionally minimal. It provides a clean starting point for
 2. Run the server:
    - `python -m src.server`
 3. Health check:
-   - `GET http://127.0.0.1:8000/health`
+   - `GET http://server-ip:8000/health`
 
 ## Endpoints (Stub)
 - `GET /health`
@@ -42,3 +42,4 @@ See `status.md` for the latest status report and open questions.
 - `client/` C++ client placeholder
 - `docs/` docs and notes
 - `scripts/` helper scripts
+

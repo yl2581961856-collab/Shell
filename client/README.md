@@ -37,12 +37,12 @@ cmake --build . --config Release
 ```
 3. Run (from `build\Release\`):
 ```powershell
-.\asr_ws_client.exe --uri ws://127.0.0.1:8000/asr/stream
+.\asr_ws_client.exe --uri ws://server-ip:8000/asr/stream
 ```
 
 ## Run
-- `./asr_ws_client --uri ws://127.0.0.1:8000/asr/stream`
-- `./asr_ws_client --uri ws://127.0.0.1:8000/asr/stream --file audio.pcm`
+- `./asr_ws_client --uri ws://server-ip:8000/asr/stream`
+- `./asr_ws_client --uri ws://server-ip:8000/asr/stream --file audio.pcm`
 - (Mic) list devices: `./asr_ws_client --list-devices`
 - (Mic) stream: `./asr_ws_client --mic --device 0 --chunk-ms 100`
 
@@ -52,4 +52,5 @@ cmake --build . --config Release
 - `--bps` defaults to 32000 bytes/sec (16kHz * 16-bit * mono).
 - In mic mode, stop with Ctrl+C or use `--duration N`.
 - For `wss://` TLS, you must switch to `asio_tls_client` and link OpenSSL.
+
 
