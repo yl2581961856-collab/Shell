@@ -5,3 +5,9 @@ uvicorn==0.22.0
 websockets==10.4
 python-multipart==0.0.6
 PyYAML==6.0.1
+numpy==1.21.6
+
+# NPU/FunASR runtime is installed separately (vendor wheels).
+# funasr
+# torch
+# torch-npu

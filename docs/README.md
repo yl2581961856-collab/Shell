@@ -1,16 +1,19 @@
 ﻿# API & Frontend Examples
 
 This document is intended for frontend integration and QA validation. The browser target is QiAnXin (Chrome kernel), so standard Web APIs below are supported.
+本说明面向前端联调与测试，目标浏览器为奇安信（Chrome 内核），可直接使用标准 Web API。
 
 ## Swagger
 FastAPI exposes interactive docs at:
 - `/docs`
 - `/redoc`
+FastAPI 自带交互式接口文档，可在上述路径查看与调试。
 
 ## Interface Overview
 - HTTP `GET /health`: service health check.
 - HTTP `POST /asr/file`: upload a full audio file and get a one-shot transcription result.
 - WebSocket `/asr/stream`: streaming ASR with per-chunk `partial` and final result.
+接口总览：健康检查、文件转写、流式转写三类。
 
 Code references in `src/server.py`:
 - `health`
@@ -19,6 +22,7 @@ Code references in `src/server.py`:
 
 ## HTTP: GET /health
 Request: `GET /health`
+用于探活，无参数。
 
 Response JSON:
 - `ok`: boolean
@@ -32,14 +36,16 @@ Example:
 Request:
 - `Content-Type: multipart/form-data`
 - Field: `file` (single audio file)
+文件上传转写，字段名必须是 `file`。
 
 Response JSON:
 - `text`: string
 - `stub`: boolean
+- `timestamps`: optional, word/segment timestamps if enabled by model
 
 Example:
 ```json
-{ "text": "你好世界", "stub": true }
+{ "text": "你好世界", "stub": true, "timestamps": [] }
 ```
 
 ## WebSocket: /asr/stream
@@ -50,18 +56,21 @@ Session constraints:
 - `encoding` optional, default `pcm`, supports `pcm | raw`
 - Max binary frame: `1MB`
 - Idle timeout: `30s`
+流式只接受 16k/16bit/mono PCM，客户端需先处理好采样率。
 
 Client message types:
 - Text JSON `type=start` or `type=config`
   - Fields: `sr`, `ch`, `fmt`, `encoding` (optional), `session_id` (optional)
 - Binary audio frames (raw PCM bytes)
 - Text JSON `type=end`
+必须先发 `start`，否则服务端会返回 `MISSING_START`。
 
 Server message types:
 - `ack`: confirm session params
-- `partial`: per-chunk partial transcription
-- `final`: final transcription, then server closes
+- `partial`: per-chunk partial transcription (may include `timestamps`)
+- `final`: final transcription, then server closes (may include `timestamps`)
 - `error`: error frame
+`partial/final` 可能带 `timestamps`，需做好前端兼容。
 
 Close codes:
 - `1000`: normal close (idle timeout or end)
@@ -119,9 +128,9 @@ function createAsrWs({ url, sessionId }) {
     if (msg.type === 'ack') {
       console.log('ack', msg);
     } else if (msg.type === 'partial') {
-      console.log('partial', msg.text, msg.seq, msg.bytes);
+      console.log('partial', msg.text, msg.seq, msg.bytes, msg.timestamps);
     } else if (msg.type === 'final') {
-      console.log('final', msg.text);
+      console.log('final', msg.text, msg.timestamps);
     } else if (msg.type === 'error') {
       console.error('error', msg.code, msg.message);
     }
@@ -216,7 +225,7 @@ async function streamFileToWs(file) {
 }
 ```
 
-### 6) 麦克风实时流（简化版）
+### 6) 麦克风实时流
 ```js
 function startMicStreaming() {
   const sessionId = `web-${Date.now()}`;

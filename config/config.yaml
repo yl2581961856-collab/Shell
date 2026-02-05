@@ -1,12 +1,12 @@
 ﻿model_paths:
-  asr: /app/data/models/asr
-  vad: /app/data/models/vad
-  punc: /app/data/models/punc
+  asr: /app/data/models/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch
+  vad: /app/data/models/speech_fsmn_vad_zh-cn-16k-common-pytorch
+  punc: /app/data/models/punc_ct-transformer_zh-cn-common-vocab
   spk: /app/data/models/speaker
 
 runtime:
   device: ascend
-  device_id: 0
+  device_id: 1
 
 server:
   host: 0.0.0.0

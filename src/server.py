@@ -7,6 +7,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import Any, Optional
 
 from fastapi import FastAPI, File, UploadFile, WebSocket
 from fastapi.responses import JSONResponse
@@ -69,6 +70,22 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _normalize_asr_result(result: Any) -> tuple[str, Optional[Any]]:
+    if hasattr(result, "text"):
+        text = getattr(result, "text", "")
+        timestamps = getattr(result, "timestamps", None)
+        return text, timestamps
+    if isinstance(result, dict):
+        text = result.get("text", "")
+        timestamps = result.get("timestamps") or result.get("timestamp")
+        return text, timestamps
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], str):
+        return result[0], result[1]
+    if isinstance(result, str):
+        return result, None
+    return "", None
+
+
 @app.get("/health")
 def health() -> dict:
     return {"ok": True}
@@ -80,10 +97,14 @@ async def asr_file(file: UploadFile = File(...)) -> JSONResponse:
     loop = asyncio.get_running_loop()
     session = asr.create_session(session_id=f"http-{uuid.uuid4().hex[:12]}")
     try:
-        text = await loop.run_in_executor(ASR_EXECUTOR, session.transcribe_bytes, audio_bytes, False)
+        result = await loop.run_in_executor(ASR_EXECUTOR, session.transcribe_bytes, audio_bytes, False)
     finally:
         session.close()
-    return JSONResponse({"text": text, "stub": True})
+    text, timestamps = _normalize_asr_result(result)
+    payload: dict[str, Any] = {"text": text, "stub": asr.is_stub()}
+    if timestamps is not None:
+        payload["timestamps"] = timestamps
+    return JSONResponse(payload)
 
 
 @app.websocket("/asr/stream")
@@ -173,18 +194,20 @@ async def asr_stream(ws: WebSocket) -> None:
                         return
                     if session is None:
                         session = asr.create_session(session_id=state.session_id)
-                    final_text = await loop.run_in_executor(ASR_EXECUTOR, session.transcribe_bytes, b"", False)
-                    await ws.send_json(
-                        {
-                            "type": "final",
-                            "text": final_text,
-                            "session_id": state.session_id,
-                            "bytes": state.bytes_total,
-                            "seq": state.seq,
-                            "ts": _now_ms(),
-                            "stub": True,
-                        }
-                    )
+                    result = await loop.run_in_executor(ASR_EXECUTOR, session.transcribe_bytes, b"", False)
+                    final_text, final_timestamps = _normalize_asr_result(result)
+                    payload: dict[str, Any] = {
+                        "type": "final",
+                        "text": final_text,
+                        "session_id": state.session_id,
+                        "bytes": state.bytes_total,
+                        "seq": state.seq,
+                        "ts": _now_ms(),
+                        "stub": asr.is_stub(),
+                    }
+                    if final_timestamps is not None:
+                        payload["timestamps"] = final_timestamps
+                    await ws.send_json(payload)
                     session.close()
                     await ws.close(code=1000)
                     return
@@ -211,18 +234,20 @@ async def asr_stream(ws: WebSocket) -> None:
                     await _send_error(ws, "MISSING_START", "start frame required before audio", state.session_id)
                     await ws.close(code=1008)
                     return
-                partial = await loop.run_in_executor(ASR_EXECUTOR, session.transcribe_bytes, chunk, True)
-                await ws.send_json(
-                    {
-                        "type": "partial",
-                        "text": partial,
-                        "session_id": state.session_id,
-                        "bytes": state.bytes_total,
-                        "seq": state.seq,
-                        "ts": _now_ms(),
-                        "stub": True,
-                    }
-                )
+                result = await loop.run_in_executor(ASR_EXECUTOR, session.transcribe_bytes, chunk, True)
+                partial, partial_timestamps = _normalize_asr_result(result)
+                payload = {
+                    "type": "partial",
+                    "text": partial,
+                    "session_id": state.session_id,
+                    "bytes": state.bytes_total,
+                    "seq": state.seq,
+                    "ts": _now_ms(),
+                    "stub": asr.is_stub(),
+                }
+                if partial_timestamps is not None:
+                    payload["timestamps"] = partial_timestamps
+                await ws.send_json(payload)
                 continue
 
             await _send_error(ws, "INVALID_FRAME", "unsupported frame type", state.session_id)
