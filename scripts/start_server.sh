@@ -1,10 +1,10 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
-# Minimal launcher for the ASR FastAPI+WebSocket server on Python 3.7.
+# Minimal launcher for the ASR FastAPI+WebSocket server on Python 3.11.
 #
 # Env vars:
-# - PYTHON_BIN: python executable (default: python3.7)
+# - PYTHON_BIN: python executable (default: python3.11)
 # - ASR_HOST / ASR_PORT: bind address (default: 0.0.0.0:8000)
 # - UVICORN_WORKERS: uvicorn worker processes (default: 1)
 # - UVICORN_LOG_LEVEL: debug/info/warning/error (default: info)
@@ -13,7 +13,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-PYTHON_BIN="${PYTHON_BIN:-python3.7}"
+PYTHON_BIN="${PYTHON_BIN:-python3.11}"
 ASR_HOST="${ASR_HOST:-0.0.0.0}"
 ASR_PORT="${ASR_PORT:-8000}"
 UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
