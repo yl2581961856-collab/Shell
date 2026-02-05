@@ -1,93 +1,13 @@
-﻿# Core configuration for the voice assistant stack.
-asr:
-  model: iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch
-  vad_model: iic/speech_fsmn_vad_zh-cn-16k-common-pytorch # 产出 vad segments
-  punc_model: iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch  # 提供 punc_array
-  device: cuda
-  language: zh
-  max_chunk_seconds: 8
-  chunk_overlap_seconds: 1.0
-  encoder_chunk_look_back: 4
-  decoder_chunk_look_back: 1
-  sentence_timestamp: true
-  return_raw_text: false
-  speaker:
-    model: iic/speech_campplus_sv_zh-cn_16k-common
-    mode: punc_segment
-    preset_spk_num: 2
-    cb_kwargs:
-      merge_thr: 0.
-    return_spk_res: true
-  generate_kwargs:
-    hotword: ""
-
-nlp:
-  siliconflow:
-    api_key: ""  # Local Qwen endpoint does not require a key
-    model: qwen3-32b-fp8
-    base_url: http://192.168.11.151:8091
-
-  knowledge_base:
-    enabled: false
-    embedding_model: sentence-transformers/paraphrase-multilingual-mpnet-base-v2
-    index_path: models/embeddings/knowledge_base.json
-  system_prompt: |
-    You are a bilingual voice assistant. Think through the answer step by step and briefly explain your reasoning.
-
-tts:
-  provider: cosyvoice # options: cosyvoice, higgs
-  model_dir: models/tts/cosyvoice
-  speaker: cosyvoice_default
-  text_language: zh
-  prompt_language: zh
-  sample_rate: 24000
-  format: wav
-  device: cuda
-  enabled: false
-  # Higgs example:
-  # api_base: http://localhost:8002
-  # api_key: "${HIGGSAUDIO_API_KEY}"
-  # default_voice: zh_female_v2
-  # timeout: 120
-
-agent:
-  enabled: false
-  system_prompt: |
-    You are a multimodal agent that can transcribe audio, retrieve knowledge, call the RAG answer tool, and synthesize speech when helpful.
-    Prefer the rag_answer tool for factual questions and keep the final reply concise and accurate.
-  retrieval_top_k: 4
-  auto_tts: false
-  temperature: 0.6
-  top_p: 0.9
+﻿model_paths:
+  asr: /app/data/models/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch
+  vad: /app/data/models/speech_fsmn_vad_zh-cn-16k-common-pytorch
+  punc: /app/data/models/punc_ct-transformer_zh-cn-common-vocab
+  spk: /app/data/models/speaker
 
 runtime:
-  tts_output_dir: logs
+  device: ascend
+  device_id: 0
 
-memory:
-  enabled: false
-  short_term:
-    type: sliding_window
-    window_size: 6
-  long_term:
-    provider: mem0
-    base_url: http://localhost:3030
-    api_key: "${MEM0_API_KEY}"
-    user_id: default
-    tags:
-      - voice-assistant
-    top_k: 5
-    summarize: false
-    summary_system_prompt: |
-      You maintain accurate, durable memory snippets for the assistant.
-    summary_prompt: |
-      Summarize the exchange below into at most three bullet points that capture enduring user preferences,
-      facts, or follow-up todos. Avoid referencing the assistant explicitly.
-      ---
-      {dialogue}
-    metadata:
-      source: voice_assistant
-
-mcp:
+server:
   host: 0.0.0.0
-  port: 9090
-
+  port: 8000
