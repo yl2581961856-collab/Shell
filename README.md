@@ -26,6 +26,9 @@ This repository is intentionally minimal. It provides a clean starting point for
 - `POST /asr/file` (multipart file upload)
 - `WS /asr/stream`
 
+## Docs
+Frontend request examples and protocol details live in `docs/README.md`.
+
 ## Config
 Model paths and server settings live in `config/config.yaml`.
 Default model path root is `/app/data/models`. Update this if your container mounts a different path.

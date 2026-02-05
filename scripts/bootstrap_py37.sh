@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Bootstrap a local venv on Python 3.7 and start the server.
+#
+# Env vars:
+# - PYTHON_BIN: python executable (default: python3.7)
+# - VENV_DIR: venv path (default: .venv)
+#
+# Note: pip>=24 dropped Python 3.7. We intentionally keep pip<24 here.
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${ROOT_DIR}"
+
+PYTHON_BIN="${PYTHON_BIN:-python3.7}"
+VENV_DIR="${VENV_DIR:-.venv}"
+
+if [[ ! -d "${VENV_DIR}" ]]; then
+  "${PYTHON_BIN}" -m venv "${VENV_DIR}"
+fi
+
+# shellcheck disable=SC1091
+source "${VENV_DIR}/bin/activate"
+
+python -m pip install -U "pip<24" "setuptools<69" wheel
+python -m pip install -r requirements.txt
+
+export PYTHON_BIN="python"
+exec scripts/start_server.sh
+
