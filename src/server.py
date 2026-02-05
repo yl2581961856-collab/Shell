@@ -2,17 +2,18 @@
 
 import asyncio
 import json
+import os
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Optional
 
 from fastapi import FastAPI, File, UploadFile, WebSocket
 from fastapi.responses import JSONResponse
 from starlette.websockets import WebSocketDisconnect
 import uvicorn
 
-from .asr_service import AsrService
+from .asr_service import AsrService, AsrSession
 from .config import load_config
 
 app = FastAPI(title="ASR Service")
@@ -25,6 +26,11 @@ SUPPORTED_SAMPLE_RATES = {16000}
 SUPPORTED_CHANNELS = {1}
 SUPPORTED_FMTS = {"pcm_s16le", "pcm16le", "s16le"}
 SUPPORTED_ENCODINGS = {"pcm", "raw"}
+
+# NOTE: WebSocket handlers are async and run on the event loop thread. ASR inference is
+# synchronous and can be CPU/NPU bound, so we must offload it to a small worker pool.
+ASR_MAX_WORKERS = int(os.getenv("ASR_MAX_WORKERS", "1"))
+ASR_EXECUTOR = ThreadPoolExecutor(max_workers=ASR_MAX_WORKERS)
 
 
 @dataclass
@@ -71,7 +77,12 @@ def health() -> dict:
 @app.post("/asr/file")
 async def asr_file(file: UploadFile = File(...)) -> JSONResponse:
     audio_bytes = await file.read()
-    text = asr.transcribe_bytes(audio_bytes)
+    loop = asyncio.get_running_loop()
+    session = asr.create_session(session_id=f"http-{uuid.uuid4().hex[:12]}")
+    try:
+        text = await loop.run_in_executor(ASR_EXECUTOR, session.transcribe_bytes, audio_bytes, False)
+    finally:
+        session.close()
     return JSONResponse({"text": text, "stub": True})
 
 
@@ -79,6 +90,8 @@ async def asr_file(file: UploadFile = File(...)) -> JSONResponse:
 async def asr_stream(ws: WebSocket) -> None:
     await ws.accept()
     state = SessionState()
+    loop = asyncio.get_running_loop()
+    session: Optional[AsrSession] = None
     try:
         while True:
             try:
@@ -138,6 +151,7 @@ async def asr_stream(ws: WebSocket) -> None:
                     state.fmt = fmt
                     state.encoding = encoding or "pcm"
                     state.started_at = time.time()
+                    session = asr.create_session(session_id=state.session_id)
 
                     await ws.send_json(
                         {
@@ -157,7 +171,9 @@ async def asr_stream(ws: WebSocket) -> None:
                         await _send_error(ws, "MISSING_START", "start frame required before end", state.session_id)
                         await ws.close(code=1008)
                         return
-                    final_text = asr.transcribe_bytes(b"", stream=False)
+                    if session is None:
+                        session = asr.create_session(session_id=state.session_id)
+                    final_text = await loop.run_in_executor(ASR_EXECUTOR, session.transcribe_bytes, b"", False)
                     await ws.send_json(
                         {
                             "type": "final",
@@ -169,6 +185,7 @@ async def asr_stream(ws: WebSocket) -> None:
                             "stub": True,
                         }
                     )
+                    session.close()
                     await ws.close(code=1000)
                     return
 
@@ -190,7 +207,11 @@ async def asr_stream(ws: WebSocket) -> None:
 
                 state.bytes_total += len(chunk)
                 state.seq += 1
-                partial = asr.transcribe_bytes(chunk, stream=True)
+                if session is None:
+                    await _send_error(ws, "MISSING_START", "start frame required before audio", state.session_id)
+                    await ws.close(code=1008)
+                    return
+                partial = await loop.run_in_executor(ASR_EXECUTOR, session.transcribe_bytes, chunk, True)
                 await ws.send_json(
                     {
                         "type": "partial",
@@ -209,6 +230,9 @@ async def asr_stream(ws: WebSocket) -> None:
             return
     except WebSocketDisconnect:
         return
+    finally:
+        if session is not None:
+            session.close()
 
 
 def main() -> None:
