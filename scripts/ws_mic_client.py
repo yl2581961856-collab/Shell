@@ -49,6 +49,66 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _normalize_device(value: Optional[str]):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text == "":
+        return None
+    if text.isdigit() or (text.startswith("-") and text[1:].isdigit()):
+        return int(text)
+    return text
+
+
+def _iter_input_devices():
+    for idx, info in enumerate(sd.query_devices()):
+        if info.get("max_input_channels", 0) > 0:
+            yield idx, info
+
+
+def _print_input_devices() -> None:
+    inputs = list(_iter_input_devices())
+    if not inputs:
+        print("No input devices found. If you're on a server/container, run this on your local machine.", file=sys.stderr)
+        return
+    print("Input devices:")
+    for idx, info in inputs:
+        name = info.get("name", "unknown")
+        chans = info.get("max_input_channels", 0)
+        host = info.get("hostapi", "n/a")
+        print(f"  [{idx}] {name} (in:{chans}, hostapi:{host})")
+
+
+def _resolve_input_device(device):
+    if device is not None:
+        return device
+    default = sd.default.device
+    if isinstance(default, (list, tuple)) and len(default) >= 1:
+        if default[0] is not None:
+            return default[0]
+    if default is not None:
+        return default
+    for idx, _info in _iter_input_devices():
+        return idx
+    return None
+
+
+def _validate_input_device(device) -> None:
+    if device is None:
+        _print_input_devices()
+        raise SystemExit(2)
+    try:
+        info = sd.query_devices(device, "input")
+    except Exception as exc:
+        print(f"No input device matching {device!r}: {exc}", file=sys.stderr)
+        _print_input_devices()
+        raise SystemExit(2) from exc
+    if info.get("max_input_channels", 0) <= 0:
+        print(f"Device {device!r} has no input channels.", file=sys.stderr)
+        _print_input_devices()
+        raise SystemExit(2)
+
+
 async def _recv_loop(ws, stop_event: asyncio.Event) -> None:
     try:
         async for msg in ws:
@@ -75,12 +135,15 @@ async def _run(args: argparse.Namespace) -> None:
     _require_sounddevice()
 
     if args.list_devices:
-        print(sd.query_devices())
+        _print_input_devices()
         return
 
     chunk_frames = int(args.sr * args.chunk_ms / 1000)
     if chunk_frames <= 0:
         raise ValueError("chunk-ms too small for given sample rate")
+
+    device = _resolve_input_device(_normalize_device(args.device))
+    _validate_input_device(device)
 
     session_id = args.session_id.strip() or f"py-{uuid.uuid4().hex[:12]}"
     start_frame = {
@@ -129,7 +192,7 @@ async def _run(args: argparse.Namespace) -> None:
                 dtype="int16",
                 blocksize=chunk_frames,
                 callback=audio_callback,
-                device=args.device,
+                device=device,
             ):
                 wait_tasks = [asyncio.create_task(stop_event.wait())]
                 if args.duration and args.duration > 0:

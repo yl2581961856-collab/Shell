@@ -116,13 +116,19 @@ class AsrService:
             self._torch = torch
 
             mp = self.config.model_paths
-            self._model = AutoModel(
-                model=mp.asr,
-                vad_model=mp.vad,
-                punc_model=mp.punc,
-                spk_model=mp.spk,
-                device=device,
-            )
+            model_kwargs: Dict[str, Any] = {
+                "model": mp.asr,
+                "device": device,
+                "disable_update": True,
+            }
+            if mp.vad:
+                model_kwargs["vad_model"] = mp.vad
+            if mp.punc:
+                model_kwargs["punc_model"] = mp.punc
+            if mp.spk:
+                model_kwargs["spk_model"] = mp.spk
+
+            self._model = AutoModel(**model_kwargs)
 
             # Optional streaming tuning parameters
             chunk_env = os.getenv("ASR_CHUNK_SIZE", "")
@@ -136,6 +142,15 @@ class AsrService:
             dec_lookback = os.getenv("ASR_DECODER_CHUNK_LOOK_BACK", "")
             if dec_lookback:
                 self._streaming_kwargs["decoder_chunk_look_back"] = int(dec_lookback)
+
+            if "chunk_size" not in self._streaming_kwargs and not mp.vad:
+                # Default streaming chunk_size works for ASR-only. VAD expects an int (ms),
+                # so we skip the tuple default when VAD is enabled to avoid type errors.
+                self._streaming_kwargs["chunk_size"] = (5, 10, 5)
+            if "encoder_chunk_look_back" not in self._streaming_kwargs:
+                self._streaming_kwargs["encoder_chunk_look_back"] = 4
+            if "decoder_chunk_look_back" not in self._streaming_kwargs:
+                self._streaming_kwargs["decoder_chunk_look_back"] = 1
 
             self._stub = False
             self._ready = True
@@ -171,6 +186,7 @@ class AsrSession:
         self._closed = False
         self._bytes_total = 0
         self._cache: Dict[str, Any] = {}
+        self._audio_buffer = bytearray()
 
     @property
     def bytes_total(self) -> int:
@@ -182,6 +198,7 @@ class AsrSession:
                 return
             self._closed = True
             self._cache.clear()
+            self._audio_buffer.clear()
 
     def transcribe_bytes(self, audio_bytes: bytes, stream: bool = False) -> AsrResult:
         # Keep this method synchronous. The server should call it via run_in_executor.
@@ -191,9 +208,10 @@ class AsrSession:
             if self._closed:
                 return AsrResult(text="", timestamps=None)
 
-            self._bytes_total += len(audio_bytes)
+            if audio_bytes:
+                self._bytes_total += len(audio_bytes)
+                self._audio_buffer.extend(audio_bytes)
 
-            audio = _pcm16le_to_float32(audio_bytes)
             is_final = not stream
 
             model = self._service._model
@@ -205,19 +223,31 @@ class AsrSession:
                 return AsrResult(text="", timestamps=None)
 
             with torch.no_grad():
-                if hasattr(model, "generate"):
-                    result = model.generate(
-                        input=audio,
-                        cache=self._cache,
-                        is_final=is_final,
-                        **self._service._streaming_kwargs,
-                    )
+                if stream:
+                    audio = _pcm16le_to_float32(audio_bytes)
+                    if hasattr(model, "generate"):
+                        result = model.generate(
+                            input=audio,
+                            cache=self._cache,
+                            is_final=False,
+                            **self._service._streaming_kwargs,
+                        )
+                    else:
+                        result = model(
+                            audio,
+                            cache=self._cache,
+                            is_final=False,
+                            **self._service._streaming_kwargs,
+                        )
                 else:
-                    result = model(
-                        audio,
-                        cache=self._cache,
-                        is_final=is_final,
-                        **self._service._streaming_kwargs,
-                    )
+                    if not audio_bytes and self._audio_buffer:
+                        audio_bytes = bytes(self._audio_buffer)
+                    if not audio_bytes:
+                        return AsrResult(text="", timestamps=None)
+                    audio = _pcm16le_to_float32(audio_bytes)
+                    if hasattr(model, "generate"):
+                        result = model.generate(input=audio)
+                    else:
+                        result = model(audio)
 
             return _extract_asr_result(result)
