@@ -41,7 +41,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--fmt", default="pcm_s16le", help="Audio format.")
     parser.add_argument("--encoding", default="pcm", help="Encoding.")
     parser.add_argument("--session-id", default="", help="Session id (optional).")
-    parser.add_argument("--chunk-ms", type=int, default=100, help="Chunk size in milliseconds.")
+    parser.add_argument("--chunk-ms", type=int, default=1200, help="Chunk size in milliseconds.")
     parser.add_argument("--queue", type=int, default=50, help="Max buffered chunks.")
     parser.add_argument("--duration", type=float, default=0.0, help="Stop after N seconds (0 = until Ctrl+C).")
     parser.add_argument("--device", default=None, help="Input device index/name.")
@@ -219,4 +219,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

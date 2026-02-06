@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import time
 import uuid
@@ -16,6 +17,13 @@ import uvicorn
 
 from .asr_service import AsrService, AsrSession
 from .config import load_config
+
+LOG_LEVEL = os.getenv("ASR_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("asr.server")
 
 app = FastAPI(title="ASR Service")
 config = load_config()
@@ -32,6 +40,7 @@ SUPPORTED_ENCODINGS = {"pcm", "raw"}
 # synchronous and can be CPU/NPU bound, so we must offload it to a small worker pool.
 ASR_MAX_WORKERS = int(os.getenv("ASR_MAX_WORKERS", "1"))
 ASR_EXECUTOR = ThreadPoolExecutor(max_workers=ASR_MAX_WORKERS)
+logger.info("ASR executor workers=%s", ASR_MAX_WORKERS)
 
 
 @dataclass
@@ -110,6 +119,7 @@ async def asr_file(file: UploadFile = File(...)) -> JSONResponse:
 @app.websocket("/asr/stream")
 async def asr_stream(ws: WebSocket) -> None:
     await ws.accept()
+    logger.info("ws accepted client=%s", ws.client)
     state = SessionState()
     loop = asyncio.get_running_loop()
     session: Optional[AsrSession] = None
@@ -118,11 +128,13 @@ async def asr_stream(ws: WebSocket) -> None:
             try:
                 msg = await asyncio.wait_for(ws.receive(), timeout=IDLE_TIMEOUT_SEC)
             except asyncio.TimeoutError:
+                logger.info("ws idle timeout session_id=%s", state.session_id)
                 await _send_error(ws, "IDLE_TIMEOUT", "no data received", state.session_id)
                 await ws.close(code=1000)
                 return
 
             if msg.get("type") == "websocket.disconnect":
+                logger.info("ws disconnected session_id=%s", state.session_id)
                 return
 
             if msg.get("text") is not None:
@@ -173,6 +185,14 @@ async def asr_stream(ws: WebSocket) -> None:
                     state.encoding = encoding or "pcm"
                     state.started_at = time.time()
                     session = asr.create_session(session_id=state.session_id)
+                    logger.info(
+                        "ws start session_id=%s sr=%s ch=%s fmt=%s encoding=%s",
+                        state.session_id,
+                        state.sr,
+                        state.ch,
+                        state.fmt,
+                        state.encoding,
+                    )
 
                     await ws.send_json(
                         {
@@ -194,6 +214,12 @@ async def asr_stream(ws: WebSocket) -> None:
                         return
                     if session is None:
                         session = asr.create_session(session_id=state.session_id)
+                    logger.info(
+                        "ws end session_id=%s bytes=%s seq=%s",
+                        state.session_id,
+                        state.bytes_total,
+                        state.seq,
+                    )
                     result = await loop.run_in_executor(ASR_EXECUTOR, session.transcribe_bytes, b"", False)
                     final_text, final_timestamps = _normalize_asr_result(result)
                     payload: dict[str, Any] = {
@@ -208,6 +234,11 @@ async def asr_stream(ws: WebSocket) -> None:
                     if final_timestamps is not None:
                         payload["timestamps"] = final_timestamps
                     await ws.send_json(payload)
+                    logger.info(
+                        "ws final session_id=%s text_len=%s",
+                        state.session_id,
+                        len(final_text or ""),
+                    )
                     session.close()
                     await ws.close(code=1000)
                     return
@@ -223,6 +254,12 @@ async def asr_stream(ws: WebSocket) -> None:
                     return
 
                 chunk = msg["bytes"]
+                logger.debug(
+                    "ws audio session_id=%s seq=%s bytes=%s",
+                    state.session_id,
+                    state.seq + 1,
+                    len(chunk),
+                )
                 if len(chunk) > MAX_FRAME_BYTES:
                     await _send_error(ws, "FRAME_TOO_LARGE", "audio frame too large", state.session_id)
                     await ws.close(code=1009)
@@ -248,13 +285,22 @@ async def asr_stream(ws: WebSocket) -> None:
                 if partial_timestamps is not None:
                     payload["timestamps"] = partial_timestamps
                 await ws.send_json(payload)
+                logger.debug(
+                    "ws partial session_id=%s text_len=%s",
+                    state.session_id,
+                    len(partial or ""),
+                )
                 continue
 
             await _send_error(ws, "INVALID_FRAME", "unsupported frame type", state.session_id)
             await ws.close(code=1003)
             return
     except WebSocketDisconnect:
+        logger.info("ws disconnect session_id=%s", state.session_id)
         return
+    except Exception:
+        logger.exception("ws error session_id=%s", state.session_id)
+        raise
     finally:
         if session is not None:
             session.close()

@@ -1,6 +1,8 @@
 ﻿from __future__ import annotations
 
+import logging
 import os
+import time
 import threading
 import uuid
 from dataclasses import dataclass
@@ -9,6 +11,8 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 
 from .config import AppConfig
+
+logger = logging.getLogger("asr.service")
 
 
 @dataclass
@@ -208,6 +212,7 @@ class AsrSession:
             if self._closed:
                 return AsrResult(text="", timestamps=None)
 
+            start_ts = time.perf_counter()
             if audio_bytes:
                 self._bytes_total += len(audio_bytes)
                 self._audio_buffer.extend(audio_bytes)
@@ -250,4 +255,13 @@ class AsrSession:
                     else:
                         result = model(audio)
 
-            return _extract_asr_result(result)
+            parsed = _extract_asr_result(result)
+            elapsed_ms = (time.perf_counter() - start_ts) * 1000.0
+            logger.debug(
+                "asr transcribe stream=%s bytes=%s text_len=%s elapsed_ms=%.2f",
+                stream,
+                len(audio_bytes),
+                len(parsed.text or ""),
+                elapsed_ms,
+            )
+            return parsed
