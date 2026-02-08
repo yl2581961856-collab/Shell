@@ -83,7 +83,7 @@ Close codes:
 ### 1) Health Check
 ```js
 async function healthCheck() {
-  const res = await fetch('http://server-ip:8000/health');
+  const res = await fetch('http://server-ip:6008/health');
   if (!res.ok) throw new Error(`health failed: ${res.status}`);
   return res.json();
 }
@@ -95,7 +95,7 @@ async function uploadFile(file) {
   const form = new FormData();
   form.append('file', file);
 
-  const res = await fetch('http://server-ip:8000/asr/file', {
+  const res = await fetch('http://server-ip:6008/asr/file', {
     method: 'POST',
     body: form,
   });
@@ -213,7 +213,7 @@ function sendPcm16InChunks(ws, pcm16, opts = {}) {
 
 async function streamFileToWs(file) {
   const sessionId = `web-${Date.now()}`;
-  const ws = createAsrWs({ url: 'ws://server-ip:8000/asr/stream', sessionId });
+  const ws = createAsrWs({ url: 'ws://server-ip:6008/asr/stream', sessionId });
 
   ws.onopen = async () => {
     const audioBuffer = await decodeAudioFile(file);
@@ -229,7 +229,7 @@ async function streamFileToWs(file) {
 ```js
 function startMicStreaming() {
   const sessionId = `web-${Date.now()}`;
-  const ws = createAsrWs({ url: 'ws://server-ip:8000/asr/stream', sessionId });
+  const ws = createAsrWs({ url: 'ws://server-ip:6008/asr/stream', sessionId });
 
   navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } })
     .then((stream) => {

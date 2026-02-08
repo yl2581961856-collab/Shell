@@ -35,7 +35,7 @@ def _require_sounddevice() -> None:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Microphone streaming client for ASR WebSocket.")
-    parser.add_argument("--uri", default="ws://server-ip:8000/asr/stream")
+    parser.add_argument("--uri", default="ws://server-ip:6008/asr/stream")
     parser.add_argument("--sr", type=int, default=16000, help="Sample rate (Hz).")
     parser.add_argument("--ch", type=int, default=1, help="Channels.")
     parser.add_argument("--fmt", default="pcm_s16le", help="Audio format.")

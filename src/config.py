@@ -61,7 +61,7 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
     )
     server = ServerConfig(
         host=_get(sv, "host", "0.0.0.0"),
-        port=int(_get(sv, "port", 8000)),
+        port=int(_get(sv, "port", 6008)),
     )
 
     return AppConfig(model_paths=model_paths, runtime=runtime, server=server)

@@ -37,12 +37,12 @@ cmake --build . --config Release
 ```
 3. Run (from `build\Release\`):
 ```powershell
-.\asr_ws_client.exe --uri ws://server-ip:8000/asr/stream
+.\asr_ws_client.exe --uri ws://server-ip:6008/asr/stream
 ```
 
 ## Run
-- `./asr_ws_client --uri ws://server-ip:8000/asr/stream`
-- `./asr_ws_client --uri ws://server-ip:8000/asr/stream --file audio.pcm`
+- `./asr_ws_client --uri ws://server-ip:6008/asr/stream`
+- `./asr_ws_client --uri ws://server-ip:6008/asr/stream --file audio.pcm`
 - (Mic) list devices: `./asr_ws_client --list-devices`
 - (Mic) stream: `./asr_ws_client --mic --device 0 --chunk-ms 100`
 

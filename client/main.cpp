@@ -277,7 +277,7 @@ private:
 #endif
 
 static void usage() {
-    std::cout << "Usage: asr_ws_client --uri ws://server-ip:8000/asr/stream "
+    std::cout << "Usage: asr_ws_client --uri ws://server-ip:6008/asr/stream "
                  "[--file audio.pcm] [--chunk-bytes 3200] [--bps 32000] "
                  "[--mic] [--chunk-ms 100] [--duration 0] [--device N] [--list-devices] "
                  "[--session-id id] [--sr 16000] [--ch 1] [--fmt pcm_s16le] [--encoding pcm]"
@@ -293,7 +293,7 @@ static std::vector<uint8_t> read_chunk(std::ifstream& in, size_t bytes) {
 }
 
 int main(int argc, char** argv) {
-    std::string uri = "ws://server-ip:8000/asr/stream";
+    std::string uri = "ws://server-ip:6008/asr/stream";
     std::string file;
     bool use_mic = false;
     bool list_devices = false;

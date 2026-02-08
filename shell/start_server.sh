@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Env vars:
 # - PYTHON_BIN: python executable (default: python3.11)
-# - ASR_HOST / ASR_PORT: bind address (default: 0.0.0.0:8000)
+# - ASR_HOST / ASR_PORT: bind address (default: 0.0.0.0:6008)
 # - UVICORN_WORKERS: uvicorn worker processes (default: 1)
 # - UVICORN_LOG_LEVEL: debug/info/warning/error (default: info)
 # - ASR_MAX_WORKERS: inference executor threads per process (default: 1)
@@ -15,7 +15,7 @@ cd "${ROOT_DIR}"
 
 PYTHON_BIN="${PYTHON_BIN:-python3.11}"
 ASR_HOST="${ASR_HOST:-0.0.0.0}"
-ASR_PORT="${ASR_PORT:-8000}"
+ASR_PORT="${ASR_PORT:-6008}"
 UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
 UVICORN_LOG_LEVEL="${UVICORN_LOG_LEVEL:-info}"
 

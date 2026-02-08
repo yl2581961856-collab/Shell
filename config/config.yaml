@@ -1,7 +1,7 @@
 ﻿model_paths:
-  asr: /app/data/models/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch
-  vad: /app/data/models/speech_fsmn_vad_zh-cn-16k-common-pytorch
-  punc: /app/data/models/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727
+  asr: /app/data/models/SenseVoiceSmall
+  vad: ""
+  punc: ""
   spk: ""
 
 runtime:
@@ -10,4 +10,4 @@ runtime:
 
 server:
   host: 0.0.0.0
-  port: 8000
+  port: 6008

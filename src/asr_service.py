@@ -82,8 +82,38 @@ class AsrService:
         self._stub = True
 
         self._model = None
+        self._backend = None
+        self._backend_type = os.getenv("ASR_BACKEND", "funasr").strip().lower()
         self._torch = None
         self._streaming_kwargs: Dict[str, Any] = {}
+        self._stream_mode = os.getenv("ASR_STREAM_MODE", "native").strip().lower()
+        self._pseudo_max_bytes = self._parse_pseudo_max_bytes(os.getenv("ASR_PSEUDO_MAX_MS", ""))
+        self._pseudo_step_bytes = self._parse_pseudo_step_bytes(os.getenv("ASR_PSEUDO_STEP_MS", ""))
+
+    @staticmethod
+    def _parse_pseudo_max_bytes(value: str) -> Optional[int]:
+        if not value:
+            return None
+        try:
+            max_ms = int(float(value))
+        except ValueError:
+            return None
+        if max_ms <= 0:
+            return None
+        # 16kHz * 16-bit * mono => 32000 bytes/sec => 32 bytes/ms
+        return max_ms * 32
+
+    @staticmethod
+    def _parse_pseudo_step_bytes(value: str) -> Optional[int]:
+        if not value:
+            return None
+        try:
+            step_ms = int(float(value))
+        except ValueError:
+            return None
+        if step_ms <= 0:
+            return None
+        return step_ms * 32
 
     def is_stub(self) -> bool:
         return self._stub
@@ -94,6 +124,38 @@ class AsrService:
             return
         with self._init_lock:
             if self._ready:
+                return
+
+            backend = self._backend_type
+            if backend in {"sensevoice", "sensevoice_small", "sv"}:
+                try:
+                    import torch
+                except Exception as exc:  # pragma: no cover - runtime dependency
+                    raise RuntimeError("PyTorch is required but not installed") from exc
+
+                device_id = int(self.config.runtime.device_id)
+                device = "cpu"
+                if self.config.runtime.device.lower() in {"ascend", "npu"}:
+                    device = f"npu:{device_id}"
+                    try:
+                        import torch_npu  # noqa: F401
+
+                        torch_npu.npu.set_device(device_id)
+                    except Exception as exc:  # pragma: no cover - runtime dependency
+                        raise RuntimeError("torch_npu is required for Ascend NPU execution") from exc
+                elif torch.cuda.is_available():
+                    device = f"cuda:{device_id}"
+
+                self._torch = torch
+
+                from .backends.sensevoice import SenseVoiceBackend
+
+                self._backend = SenseVoiceBackend(
+                    model_path=self.config.model_paths.asr,
+                    device=device,
+                )
+                self._stub = False
+                self._ready = True
                 return
 
             try:
@@ -191,6 +253,7 @@ class AsrSession:
         self._bytes_total = 0
         self._cache: Dict[str, Any] = {}
         self._audio_buffer = bytearray()
+        self._pseudo_last_emit_bytes = 0
 
     @property
     def bytes_total(self) -> int:
@@ -203,6 +266,14 @@ class AsrSession:
             self._closed = True
             self._cache.clear()
             self._audio_buffer.clear()
+
+    def reset_stream_state(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._cache.clear()
+            self._audio_buffer.clear()
+            self._pseudo_last_emit_bytes = 0
 
     def transcribe_bytes(self, audio_bytes: bytes, stream: bool = False) -> AsrResult:
         # Keep this method synchronous. The server should call it via run_in_executor.
@@ -220,7 +291,8 @@ class AsrSession:
             is_final = not stream
 
             model = self._service._model
-            if model is None:
+            backend = self._service._backend
+            if model is None and backend is None:
                 return AsrResult(text="", timestamps=None)
 
             torch = self._service._torch
@@ -229,31 +301,51 @@ class AsrSession:
 
             with torch.no_grad():
                 if stream:
-                    audio = _pcm16le_to_float32(audio_bytes)
-                    if hasattr(model, "generate"):
-                        result = model.generate(
-                            input=audio,
-                            cache=self._cache,
-                            is_final=False,
-                            **self._service._streaming_kwargs,
-                        )
+                    use_pseudo = self._service._stream_mode in {"pseudo", "llm"} or backend is not None
+                    if use_pseudo:
+                        if self._service._pseudo_step_bytes:
+                            if (self._bytes_total - self._pseudo_last_emit_bytes) < self._service._pseudo_step_bytes:
+                                return AsrResult(text="", timestamps=None)
+                            self._pseudo_last_emit_bytes = self._bytes_total
+                        if self._service._pseudo_max_bytes and len(self._audio_buffer) > self._service._pseudo_max_bytes:
+                            self._audio_buffer = self._audio_buffer[-self._service._pseudo_max_bytes :]
+                        audio = _pcm16le_to_float32(bytes(self._audio_buffer))
+                        if backend is not None:
+                            result = backend.transcribe_segment(audio)
+                        else:
+                            if hasattr(model, "generate"):
+                                result = model.generate(input=audio)
+                            else:
+                                result = model(audio)
                     else:
-                        result = model(
-                            audio,
-                            cache=self._cache,
-                            is_final=False,
-                            **self._service._streaming_kwargs,
-                        )
+                        audio = _pcm16le_to_float32(audio_bytes)
+                        if hasattr(model, "generate"):
+                            result = model.generate(
+                                input=audio,
+                                cache=self._cache,
+                                is_final=False,
+                                **self._service._streaming_kwargs,
+                            )
+                        else:
+                            result = model(
+                                audio,
+                                cache=self._cache,
+                                is_final=False,
+                                **self._service._streaming_kwargs,
+                            )
                 else:
                     if not audio_bytes and self._audio_buffer:
                         audio_bytes = bytes(self._audio_buffer)
                     if not audio_bytes:
                         return AsrResult(text="", timestamps=None)
                     audio = _pcm16le_to_float32(audio_bytes)
-                    if hasattr(model, "generate"):
-                        result = model.generate(input=audio)
+                    if backend is not None:
+                        result = backend.transcribe_segment(audio)
                     else:
-                        result = model(audio)
+                        if hasattr(model, "generate"):
+                            result = model.generate(input=audio)
+                        else:
+                            result = model(audio)
 
             parsed = _extract_asr_result(result)
             elapsed_ms = (time.perf_counter() - start_ts) * 1000.0

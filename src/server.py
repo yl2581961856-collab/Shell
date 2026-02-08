@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import asyncio
+import audioop
 import json
 import logging
 import os
@@ -35,6 +36,22 @@ SUPPORTED_SAMPLE_RATES = {16000}
 SUPPORTED_CHANNELS = {1}
 SUPPORTED_FMTS = {"pcm_s16le", "pcm16le", "s16le"}
 SUPPORTED_ENCODINGS = {"pcm", "raw"}
+DEDUP_PARTIAL = os.getenv("ASR_DEDUP_PARTIAL", "1").strip().lower() in {"1", "true", "yes"}
+STREAM_MODE = os.getenv("ASR_STREAM_MODE", "native").strip().lower()
+VAD_ENABLED = os.getenv("ASR_SIMPLE_VAD", "1" if STREAM_MODE in {"pseudo", "llm"} else "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+VAD_MIN_RMS = float(os.getenv("ASR_VAD_MIN_RMS", "0.01"))
+VAD_END_MS = float(os.getenv("ASR_VAD_END_MS", "1200"))
+VAD_AUTO_END = os.getenv("ASR_VAD_AUTO_END", "0").strip().lower() in {"1", "true", "yes"}
+VAD_AUTO_FINAL = os.getenv("ASR_VAD_AUTO_FINAL", "1" if STREAM_MODE in {"pseudo", "llm"} else "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+UTT_MAX_MS = float(os.getenv("ASR_UTT_MAX_MS", "30000" if STREAM_MODE in {"pseudo", "llm"} else "0"))
 
 # NOTE: WebSocket handlers are async and run on the event loop thread. ASR inference is
 # synchronous and can be CPU/NPU bound, so we must offload it to a small worker pool.
@@ -54,6 +71,11 @@ class SessionState:
     bytes_total: int = 0
     seq: int = 0
     started_at: float = 0.0
+    last_partial_text: str = ""
+    vad_silence_ms: float = 0.0
+    vad_seen_voice: bool = False
+    segment_id: int = 0
+    utt_bytes: int = 0
 
 
 def _normalize_token(value: str) -> str:
@@ -93,6 +115,53 @@ def _normalize_asr_result(result: Any) -> tuple[str, Optional[Any]]:
     if isinstance(result, str):
         return result, None
     return "", None
+
+
+def _chunk_ms(num_bytes: int, sr: int, ch: int) -> float:
+    if num_bytes <= 0 or sr <= 0 or ch <= 0:
+        return 0.0
+    return (num_bytes / (sr * ch * 2)) * 1000.0
+
+
+async def _emit_final(
+    ws: WebSocket,
+    session: AsrSession,
+    state: SessionState,
+    loop: asyncio.AbstractEventLoop,
+    close_ws: bool,
+) -> None:
+    result = await loop.run_in_executor(ASR_EXECUTOR, session.transcribe_bytes, b"", False)
+    final_text, final_timestamps = _normalize_asr_result(result)
+    payload: dict[str, Any] = {
+        "type": "final",
+        "text": final_text,
+        "session_id": state.session_id,
+        "segment_id": state.segment_id,
+        "bytes": state.bytes_total,
+        "seq": state.seq,
+        "ts": _now_ms(),
+        "stub": asr.is_stub(),
+    }
+    if final_timestamps is not None:
+        payload["timestamps"] = final_timestamps
+    await ws.send_json(payload)
+    logger.info(
+        "ws final session_id=%s segment_id=%s text_len=%s",
+        state.session_id,
+        state.segment_id,
+        len(final_text or ""),
+    )
+    if close_ws:
+        session.close()
+        await ws.close(code=1000)
+        return
+
+    session.reset_stream_state()
+    state.vad_silence_ms = 0.0
+    state.vad_seen_voice = False
+    state.last_partial_text = ""
+    state.utt_bytes = 0
+    state.segment_id += 1
 
 
 @app.get("/health")
@@ -220,27 +289,7 @@ async def asr_stream(ws: WebSocket) -> None:
                         state.bytes_total,
                         state.seq,
                     )
-                    result = await loop.run_in_executor(ASR_EXECUTOR, session.transcribe_bytes, b"", False)
-                    final_text, final_timestamps = _normalize_asr_result(result)
-                    payload: dict[str, Any] = {
-                        "type": "final",
-                        "text": final_text,
-                        "session_id": state.session_id,
-                        "bytes": state.bytes_total,
-                        "seq": state.seq,
-                        "ts": _now_ms(),
-                        "stub": asr.is_stub(),
-                    }
-                    if final_timestamps is not None:
-                        payload["timestamps"] = final_timestamps
-                    await ws.send_json(payload)
-                    logger.info(
-                        "ws final session_id=%s text_len=%s",
-                        state.session_id,
-                        len(final_text or ""),
-                    )
-                    session.close()
-                    await ws.close(code=1000)
+                    await _emit_final(ws, session, state, loop, close_ws=True)
                     return
 
                 await _send_error(ws, "INVALID_FRAME", "unknown text frame type", state.session_id)
@@ -271,12 +320,41 @@ async def asr_stream(ws: WebSocket) -> None:
                     await _send_error(ws, "MISSING_START", "start frame required before audio", state.session_id)
                     await ws.close(code=1008)
                     return
+
+                if VAD_ENABLED:
+                    rms = audioop.rms(chunk, 2) / 32768.0 if chunk else 0.0
+                    if rms >= VAD_MIN_RMS:
+                        state.vad_silence_ms = 0.0
+                        state.vad_seen_voice = True
+                    else:
+                        state.vad_silence_ms += _chunk_ms(len(chunk), state.sr, state.ch)
+                        if state.vad_seen_voice and state.vad_silence_ms >= VAD_END_MS:
+                            logger.info("ws vad end session_id=%s", state.session_id)
+                            if VAD_AUTO_END:
+                                await _emit_final(ws, session, state, loop, close_ws=True)
+                                return
+                            if VAD_AUTO_FINAL:
+                                await _emit_final(ws, session, state, loop, close_ws=False)
+                                continue
+                        continue
+                state.utt_bytes += len(chunk)
+                if UTT_MAX_MS > 0:
+                    utt_ms = _chunk_ms(state.utt_bytes, state.sr, state.ch)
+                    if utt_ms >= UTT_MAX_MS:
+                        logger.info("ws utt max session_id=%s ms=%.1f", state.session_id, utt_ms)
+                        await _emit_final(ws, session, state, loop, close_ws=False)
+                        continue
                 result = await loop.run_in_executor(ASR_EXECUTOR, session.transcribe_bytes, chunk, True)
                 partial, partial_timestamps = _normalize_asr_result(result)
+                if DEDUP_PARTIAL and partial:
+                    if partial == state.last_partial_text:
+                        continue
+                    state.last_partial_text = partial
                 payload = {
                     "type": "partial",
                     "text": partial,
                     "session_id": state.session_id,
+                    "segment_id": state.segment_id,
                     "bytes": state.bytes_total,
                     "seq": state.seq,
                     "ts": _now_ms(),
