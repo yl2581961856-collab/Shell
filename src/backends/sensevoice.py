@@ -35,15 +35,21 @@ class SenseVoiceBackend:
         tokenizer_conf = config.get("tokenizer_conf") or {}
         model_conf = self._normalize_model_conf(config, model_path, tokenizer_conf)
 
-        self.device = device
-        self.model, api_tokenizer = self._build_model(SenseVoiceSmall, config, model_conf, code_path, model_path, device)
-
         ckpt = os.path.join(model_path, "model.pt")
         if not os.path.exists(ckpt):
             raise FileNotFoundError(f"Model weights not found: {ckpt}")
 
+        state_dict = torch.load(ckpt, map_location="cpu")
+        inferred_input = self._infer_input_size(state_dict)
+        if inferred_input:
+            if not model_conf.get("input_size") or int(model_conf.get("input_size", 0)) <= 0:
+                model_conf["input_size"] = inferred_input
+                logger.info("SenseVoice input_size inferred: %s", inferred_input)
+
+        self.device = device
+        self.model, api_tokenizer = self._build_model(SenseVoiceSmall, config, model_conf, code_path, model_path, device)
+
         if hasattr(self.model, "load_state_dict"):
-            state_dict = torch.load(ckpt, map_location="cpu")
             self.model.load_state_dict(state_dict)
         if hasattr(self.model, "to"):
             self.model.to(self.device)
@@ -169,6 +175,19 @@ class SenseVoiceBackend:
             except Exception as exc:
                 logger.warning("Failed to load token list from %s: %s", path, exc)
                 continue
+        return 0
+
+    @staticmethod
+    def _infer_input_size(state_dict: Dict[str, Any]) -> int:
+        # Infer input feature dimension from checkpoint weights.
+        for key in (
+            "encoder.encoders0.0.self_attn.linear_q_k_v.weight",
+            "encoder.encoders.0.self_attn.linear_q_k_v.weight",
+            "encoder.encoders0.0.self_attn.linear_q.weight",
+        ):
+            weight = state_dict.get(key)
+            if weight is not None and hasattr(weight, "shape") and len(weight.shape) == 2:
+                return int(weight.shape[1])
         return 0
 
     @staticmethod
