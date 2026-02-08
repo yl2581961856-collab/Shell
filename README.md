@@ -34,6 +34,12 @@ Example:
 bash shell/start_sensevoice.sh
 ```
 
+## Paraformer WS (FunASR)
+Run Paraformer via FunASR backend:
+```bash
+bash shell/start_paraformer.sh
+```
+
 Warmup note: the first inference triggers model load and can be slow. Send a short audio request to warm up before live testing.
 
 ## Endpoints (Stub)
@@ -43,6 +49,7 @@ Warmup note: the first inference triggers model load and can be slow. Send a sho
 
 ## Docs
 Frontend request examples and protocol details live in `docs/README.md`.
+Handover notes for SenseVoice pseudo-streaming live in `docs/handover.md`.
 
 ## Config
 Model paths and server settings live in `config/config.yaml`.
