@@ -21,6 +21,21 @@ This repository is intentionally minimal. It provides a clean starting point for
 3. Health check:
    - `GET http://server-ip:6008/health`
 
+## SenseVoice WS (Pseudo-Streaming)
+When using SenseVoice source backend, start the server with these env vars:
+- `ASR_BACKEND=sensevoice`
+- `SENSEVOICE_CODE_PATH=/app/data/asr/SenseVoice`
+- `ASR_STREAM_MODE=pseudo`
+- Optional: `ASR_PSEUDO_STEP_MS=1200`, `ASR_PSEUDO_MAX_MS=8000`
+- Optional VAD: `ASR_SIMPLE_VAD=1`, `ASR_VAD_MIN_RMS=0.01`, `ASR_VAD_END_MS=1200`, `ASR_VAD_AUTO_FINAL=1`
+
+Example:
+```bash
+bash shell/start_sensevoice.sh
+```
+
+Warmup note: the first inference triggers model load and can be slow. Send a short audio request to warm up before live testing.
+
 ## Endpoints (Stub)
 - `GET /health`
 - `POST /asr/file` (multipart file upload)
