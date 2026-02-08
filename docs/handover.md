@@ -113,6 +113,16 @@ Tune these if needed.
 ## 11) 环境变量与依赖采集 (交接必备)
 目的：后续人员能完整复现当前可跑通环境。建议将输出保存为 `docs/env_snapshot.txt` 或同目录下带日期的文件。
 
+已在服务器执行并保存：
+- `/app/data/asr/AscendBridge-asr-for-ascend/docs/env_snapshot_2026-02-08.txt`
+
+注意：该文件包含敏感信息（如 AutoDL 相关 Token/URL）。对外共享或入库前务必脱敏。
+
+当前服务器系统信息（来自 `cat /etc/os-release` 和 `uname -a`）：
+- OS Userland: openEuler 24.03 (LTS)
+- Kernel: 5.15.0-101-generic (显示为 Ubuntu 标记，但用户态为 openEuler)
+- Arch: aarch64
+
 建议在服务器执行以下命令并保存输出：
 ```bash
 # 基础系统信息
