@@ -6,7 +6,7 @@ import os
 import time
 import uuid
 import wave
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -61,6 +61,44 @@ def _emit(payload: Dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=False))
 
 
+def _resolve_player() -> Callable[[np.ndarray, int], None]:
+    try:
+        import sounddevice as sd  # type: ignore
+
+        def _play(chunk: np.ndarray, sr: int) -> None:
+            if chunk.size == 0:
+                return
+            try:
+                sd.play(chunk, sr, blocking=True)
+            except Exception as exc:  # pragma: no cover - runtime dependency
+                raise SystemExit(f"Audio playback failed (sounddevice): {exc}") from exc
+
+        return _play
+    except Exception:
+        pass
+
+    try:
+        import simpleaudio as sa  # type: ignore
+    except Exception as exc:  # pragma: no cover - runtime dependency
+        raise SystemExit(
+            "Playback requested but no audio backend is available. "
+            "Install 'sounddevice' or 'simpleaudio'."
+        ) from exc
+
+    def _play(chunk: np.ndarray, sr: int) -> None:
+        if chunk.size == 0:
+            return
+        pcm = np.clip(chunk, -1.0, 1.0)
+        pcm16 = (pcm * 32767.0).astype(np.int16)
+        try:
+            play_obj = sa.play_buffer(pcm16.tobytes(), 1, 2, sr)
+            play_obj.wait_done()
+        except Exception as exc:  # pragma: no cover - runtime dependency
+            raise SystemExit(f"Audio playback failed (simpleaudio): {exc}") from exc
+
+    return _play
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fun-ASR-Nano pseudo-streaming evaluator.")
     parser.add_argument("--input", required=True, help="Input audio path (.wav or .pcm).")
@@ -72,6 +110,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--session-id", default="", help="Session id.")
     parser.add_argument("--model", default=os.getenv("FUNASR_NANO_MODEL", ""), help="Fun-ASR-Nano model path or id.")
     parser.add_argument("--device", default=os.getenv("FUNASR_NANO_DEVICE", "npu:0"), help="Device string.")
+    parser.add_argument(
+        "--play",
+        action="store_true",
+        help="Play audio in real time while evaluating (requires sounddevice or simpleaudio).",
+    )
+    parser.add_argument(
+        "--realtime",
+        action="store_true",
+        help="Sleep per chunk to simulate real-time streaming.",
+    )
     return parser.parse_args()
 
 
@@ -103,6 +151,8 @@ def main() -> None:
     if chunk_samples <= 0:
         raise SystemExit("chunk-ms too small")
 
+    player = _resolve_player() if args.play else None
+
     session_id = args.session_id.strip() or f"nano-{uuid.uuid4().hex[:12]}"
     _emit(
         {
@@ -126,6 +176,11 @@ def main() -> None:
         chunks.append(chunk)
         bytes_total += len(chunk) * 2
         seq += 1
+
+        if player is not None:
+            player(chunk, sr)
+        elif args.realtime:
+            time.sleep(len(chunk) / sr)
 
         if seq % max(1, args.update_every) != 0:
             continue

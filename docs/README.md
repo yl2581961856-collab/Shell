@@ -264,3 +264,6 @@ Notes:
 - `MediaRecorder` outputs compressed data and cannot be sent directly.
 - If the browser does not output 16k PCM, you need a real-time resampler (AudioWorklet). The file example above uses OfflineAudioContext for correct 16k conversion.
 
+## Server Model Eval
+For SenseVoice/Nano pseudo-streaming evaluation steps on server, see `docs/server_model_eval.md`.
+

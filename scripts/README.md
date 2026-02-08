@@ -10,3 +10,4 @@ Shell launchers (see `shell/`):
 - `shell/start_server_6008.sh`: start server on `0.0.0.0:6008`.
 - `shell/start_server_debug.sh`: start server with DEBUG logs.
 - `shell/bootstrap_py311.sh`: create a local venv on Python 3.11, install deps, and start the server.
+- `shell/run_model_eval.sh`: run pseudo-streaming eval for SenseVoice/Nano and save JSONL logs.
