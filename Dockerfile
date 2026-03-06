@@ -12,13 +12,13 @@ WORKDIR /app/asr
 # If your base image already includes Python 3.11, you can remove this section.
 # openEuler uses dnf; adjust for your base image as needed.
 RUN dnf -y install \
-    python3.11 python3.11-devel python3.11-pip \
+    python3 python3-devel python3-pip \
     ca-certificates git \
     && dnf clean all
 
 COPY requirements.txt .
-RUN python3.11 -m pip install --no-cache-dir --upgrade pip \
-    && python3.11 -m pip install --no-cache-dir -r requirements.txt
+RUN python3 -m pip install --no-cache-dir --upgrade pip \
+    && python3 -m pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
