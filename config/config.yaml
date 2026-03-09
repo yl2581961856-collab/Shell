@@ -5,7 +5,7 @@
   spk: ""
 
 runtime:
-  device: ascend
+  device: cpu
   device_id: 0
 
 server:

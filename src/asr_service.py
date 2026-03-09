@@ -186,6 +186,8 @@ class AsrService:
                 "model": mp.asr,
                 "device": device,
                 "disable_update": True,
+                "model_hub": "local",
+                "trust_remote_code": True
             }
             if mp.vad:
                 model_kwargs["vad_model"] = mp.vad
